@@ -291,9 +291,12 @@ struct ConsumerCfg {
     agent_cap: u32,
 }
 
+/// `cfg_off` is the kernel's slot inside the runtime's consolidated cfg
+/// buffer (`sims::tom_probe::CFG_OFF_<kernel>`); every kernel's cfg lives
+/// in `cfg_all_buf` at a 256-byte stride since the 2026-09-03 perf pass.
 fn write_consumer_cfg(
     rt: &GeneratedRuntime,
-    cfg_buf: &wgpu::Buffer,
+    cfg_off: u64,
     event_count: u32,
 ) {
     let cfg = ConsumerCfg {
@@ -304,7 +307,7 @@ fn write_consumer_cfg(
     };
     rt.gpu
         .queue
-        .write_buffer(cfg_buf, 0, bytemuck::bytes_of(&cfg));
+        .write_buffer(&rt.cfg_all_buf, cfg_off, bytemuck::bytes_of(&cfg));
 }
 
 /// Synchronous `observe`: enqueue an EffectObserveApplied chronicle
@@ -317,7 +320,7 @@ pub fn dispatch_observe(rt: &mut GeneratedRuntime, observer: u32, target: u32) {
     use sims::tom_probe::physics_ApplyObserveBeliefUpdate as obs;
 
     rt.effect_observe_applied(observer, target, 0);
-    write_consumer_cfg(rt, &rt.cfg_physics_ApplyObserveBeliefUpdate_buf, 1);
+    write_consumer_cfg(rt, sims::tom_probe::CFG_OFF_physics_ApplyObserveBeliefUpdate, 1);
 
     let mut encoder = rt.gpu.device.create_command_encoder(
         &wgpu::CommandEncoderDescriptor {
@@ -335,7 +338,7 @@ pub fn dispatch_observe(rt: &mut GeneratedRuntime, observer: u32, target: u32) {
         beliefs_type: &rt.beliefs_type_buf,
         beliefs_tick: &rt.beliefs_tick_buf,
         beliefs_confidence: &rt.beliefs_confidence_buf,
-        cfg: &rt.cfg_physics_ApplyObserveBeliefUpdate_buf,
+        cfg: wgpu::BufferBinding { buffer: &rt.cfg_all_buf, offset: sims::tom_probe::CFG_OFF_physics_ApplyObserveBeliefUpdate, size: std::num::NonZeroU64::new(sims::tom_probe::CFG_SLOT_BYTES) },
     };
     dispatch::dispatch_physics_applyobservebeliefupdate(
         &mut rt.cache,
@@ -363,7 +366,7 @@ pub fn dispatch_scry(
     // Per `cpu_chronicle_reference::Scry`: slot 2 = caster (= observer),
     // slot 3 = target (= subject), slot 4 = target_observer, slot 5 = subject_idx.
     rt.effect_scry_applied(observer, subject, target_observer, subject);
-    write_consumer_cfg(rt, &rt.cfg_physics_ApplyScryBeliefUpdate_buf, 1);
+    write_consumer_cfg(rt, sims::tom_probe::CFG_OFF_physics_ApplyScryBeliefUpdate, 1);
 
     let mut encoder = rt.gpu.device.create_command_encoder(
         &wgpu::CommandEncoderDescriptor {
@@ -379,7 +382,7 @@ pub fn dispatch_scry(
         beliefs_confidence: &rt.beliefs_confidence_buf,
         beliefs_suspicion: &rt.beliefs_suspicion_buf,
         beliefs_flags: &rt.beliefs_flags_buf,
-        cfg: &rt.cfg_physics_ApplyScryBeliefUpdate_buf,
+        cfg: wgpu::BufferBinding { buffer: &rt.cfg_all_buf, offset: sims::tom_probe::CFG_OFF_physics_ApplyScryBeliefUpdate, size: std::num::NonZeroU64::new(sims::tom_probe::CFG_SLOT_BYTES) },
     };
     dispatch::dispatch_physics_applyscrybeliefupdate(
         &mut rt.cache,
@@ -419,7 +422,7 @@ pub fn dispatch_reveal(rt: &mut GeneratedRuntime, caster: u32, subject: u32) {
             .append_chronicle_record(&rt.gpu.queue, &record);
     }
 
-    write_consumer_cfg(rt, &rt.cfg_physics_ApplyRevealBeliefUpdate_buf, n);
+    write_consumer_cfg(rt, sims::tom_probe::CFG_OFF_physics_ApplyRevealBeliefUpdate, n);
 
     let mut encoder = rt.gpu.device.create_command_encoder(
         &wgpu::CommandEncoderDescriptor {
@@ -435,7 +438,7 @@ pub fn dispatch_reveal(rt: &mut GeneratedRuntime, caster: u32, subject: u32) {
         beliefs_confidence: &rt.beliefs_confidence_buf,
         beliefs_suspicion: &rt.beliefs_suspicion_buf,
         beliefs_flags: &rt.beliefs_flags_buf,
-        cfg: &rt.cfg_physics_ApplyRevealBeliefUpdate_buf,
+        cfg: wgpu::BufferBinding { buffer: &rt.cfg_all_buf, offset: sims::tom_probe::CFG_OFF_physics_ApplyRevealBeliefUpdate, size: std::num::NonZeroU64::new(sims::tom_probe::CFG_SLOT_BYTES) },
     };
     dispatch::dispatch_physics_applyrevealbeliefupdate(
         &mut rt.cache,
@@ -460,7 +463,7 @@ pub fn dispatch_decoy(
     use sims::tom_probe::physics_ApplyDecoyBeliefUpdate as decoy;
 
     rt.effect_decoy_applied(caster, target, subject_idx, fake_pos);
-    write_consumer_cfg(rt, &rt.cfg_physics_ApplyDecoyBeliefUpdate_buf, 1);
+    write_consumer_cfg(rt, sims::tom_probe::CFG_OFF_physics_ApplyDecoyBeliefUpdate, 1);
 
     let mut encoder = rt.gpu.device.create_command_encoder(
         &wgpu::CommandEncoderDescriptor {
@@ -474,7 +477,7 @@ pub fn dispatch_decoy(
         beliefs_type: &rt.beliefs_type_buf,
         beliefs_tick: &rt.beliefs_tick_buf,
         beliefs_confidence: &rt.beliefs_confidence_buf,
-        cfg: &rt.cfg_physics_ApplyDecoyBeliefUpdate_buf,
+        cfg: wgpu::BufferBinding { buffer: &rt.cfg_all_buf, offset: sims::tom_probe::CFG_OFF_physics_ApplyDecoyBeliefUpdate, size: std::num::NonZeroU64::new(sims::tom_probe::CFG_SLOT_BYTES) },
     };
     dispatch::dispatch_physics_applydecoybeliefupdate(
         &mut rt.cache,
@@ -504,7 +507,7 @@ pub fn dispatch_erase_belief(
     rt.effect_erase_belief_applied(caster, target, subject_idx, fields as u32);
     write_consumer_cfg(
         rt,
-        &rt.cfg_physics_ApplyEraseBeliefUpdate_and_ApplyDisguise_buf,
+        sims::tom_probe::CFG_OFF_physics_ApplyEraseBeliefUpdate_and_ApplyDisguise,
         1,
     );
 
@@ -524,7 +527,7 @@ pub fn dispatch_erase_belief(
         beliefs_confidence: &rt.beliefs_confidence_buf,
         beliefs_suspicion: &rt.beliefs_suspicion_buf,
         beliefs_flags: &rt.beliefs_flags_buf,
-        cfg: &rt.cfg_physics_ApplyEraseBeliefUpdate_and_ApplyDisguise_buf,
+        cfg: wgpu::BufferBinding { buffer: &rt.cfg_all_buf, offset: sims::tom_probe::CFG_OFF_physics_ApplyEraseBeliefUpdate_and_ApplyDisguise, size: std::num::NonZeroU64::new(sims::tom_probe::CFG_SLOT_BYTES) },
     };
     dispatch::dispatch_physics_applyerasebeliefupdate_and_applydisguise(
         &mut rt.cache,
@@ -554,7 +557,7 @@ pub fn dispatch_disguise(
     rt.effect_disguise_applied(caster, caster, payload);
     write_consumer_cfg(
         rt,
-        &rt.cfg_physics_ApplyEraseBeliefUpdate_and_ApplyDisguise_buf,
+        sims::tom_probe::CFG_OFF_physics_ApplyEraseBeliefUpdate_and_ApplyDisguise,
         1,
     );
 
@@ -574,7 +577,7 @@ pub fn dispatch_disguise(
         beliefs_confidence: &rt.beliefs_confidence_buf,
         beliefs_suspicion: &rt.beliefs_suspicion_buf,
         beliefs_flags: &rt.beliefs_flags_buf,
-        cfg: &rt.cfg_physics_ApplyEraseBeliefUpdate_and_ApplyDisguise_buf,
+        cfg: wgpu::BufferBinding { buffer: &rt.cfg_all_buf, offset: sims::tom_probe::CFG_OFF_physics_ApplyEraseBeliefUpdate_and_ApplyDisguise, size: std::num::NonZeroU64::new(sims::tom_probe::CFG_SLOT_BYTES) },
     };
     dispatch::dispatch_physics_applyerasebeliefupdate_and_applydisguise(
         &mut rt.cache,

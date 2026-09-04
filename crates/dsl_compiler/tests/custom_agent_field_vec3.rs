@@ -199,6 +199,7 @@ fn synthesize_runtime_allocates_vec3_buf() {
         false,
         false, // binds_navgrid
         &[],
+        &[],
         0,
         0,
         false,

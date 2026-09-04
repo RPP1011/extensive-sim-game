@@ -169,6 +169,7 @@ fn multi_item_shared_field_runtime_struct_has_one_buffer_per_field() {
         false,
         false, // binds_navgrid
         &[],
+        &[],
         item_entity_count,
         group_entity_count,
         false,

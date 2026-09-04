@@ -147,6 +147,7 @@ fn fold_step_snapshot_copies_event_tail_into_cfg_event_count() {
         // copy from the side buffer into each fold's cfg.event_count
         // slot inside the main encoder.
         &[],
+        &[],
         0,
         0,
         false,
@@ -169,18 +170,11 @@ fn fold_step_snapshot_copies_event_tail_into_cfg_event_count() {
          --- generated runtime_core.rs ---\n{out}",
     );
 
-    // (b) Snapshot encoder + submit at top of step(). The encoder
-    // copies event_tail into prev_event_tail_buf and submits BEFORE
-    // any host queue.write_buffer overwrites the GPU tail. wgpu
-    // guarantees queue writes land before encoder commands within
-    // the SAME submit, so the separate-submit pattern is the only
-    // way to capture the prior-tick GPU producer count.
-    let snapshot_block = "snap_encoder.copy_buffer_to_buffer(\n                \
-                          self.event_ring.tail(),\n                \
-                          0,\n                \
-                          &self.prev_event_tail_buf,\n                \
-                          0,\n                \
-                          4,\n            );";
+    // (b) The prior-tick tail snapshot is the FIRST command of the one
+    // step() encoder (PERF 2026-09-03: one encoder, one submit per tick).
+    // It is recorded before the in-encoder tail reset, so it captures
+    // the prior-tick GPU producer count.
+    let snapshot_block = "        encoder.copy_buffer_to_buffer(\n            self.event_ring.tail(),\n            0,\n            &self.prev_event_tail_buf,\n            0,\n            4,\n        );";
     assert!(
         out.contains(snapshot_block),
         "missing prev-tick tail snapshot block.\n\
@@ -188,24 +182,16 @@ fn fold_step_snapshot_copies_event_tail_into_cfg_event_count() {
          --- generated runtime_core.rs ---\n{out}",
     );
     assert!(
-        out.contains("self.gpu.queue.submit(Some(snap_encoder.finish()));"),
-        "missing snap_encoder submit.\n\
+        !out.contains("snap_encoder"),
+        "the snapshot must live in the step encoder, not a separate submit.\n\
          --- generated runtime_core.rs ---\n{out}",
     );
 
-    // (c) Main encoder copies prev_event_tail_buf → cfg_<fold>_buf
-    // slot 0. This MUST happen AFTER the per-tick cfg_bytes
-    // queue.write_buffer (which sets all four slots to
-    // [agent_count, tick, 1, agent_count]) so it overwrites slot 0
-    // with the snapshot value. Encoder commands run after queue
-    // writes within a submit, so source order doesn't matter — but
-    // the copy MUST be in the main encoder, not the snap encoder.
-    let cfg_copy = "encoder.copy_buffer_to_buffer(\n            \
-                    &self.prev_event_tail_buf,\n            \
-                    0,\n            \
-                    &self.cfg_fold_my_view_buf,\n            \
-                    0,\n            \
-                    4,\n        );";
+    // (c) A fold whose WGSL does not read the tail binding directly (this
+    // synthetic spec carries no WGSL) still gets its cfg.event_count slot
+    // filled by an in-encoder copy — into the consolidated cfg buffer at
+    // the kernel's offset.
+    let cfg_copy = "        encoder.copy_buffer_to_buffer(\n            &self.prev_event_tail_buf,\n            0,\n            &self.cfg_all_buf,\n            CFG_OFF_fold_my_view,\n            4,\n        );";
     assert!(
         out.contains(cfg_copy),
         "missing main-encoder copy from prev_event_tail_buf into fold cfg.\n\
@@ -213,19 +199,19 @@ fn fold_step_snapshot_copies_event_tail_into_cfg_event_count() {
          --- generated runtime_core.rs ---\n{out}",
     );
 
-    // Order pin: the snapshot submit MUST land before clear_tail_in.
-    // (clear_tail_in is an encoder command that zeroes the GPU tail
-    // for the current tick's producers; if the snapshot ran after,
-    // it would capture 0 instead of the prior-tick producer count.)
-    let snap_submit_pos = out
-        .find("self.gpu.queue.submit(Some(snap_encoder.finish()));")
-        .expect("snap_encoder submit missing");
+    // Order pin: the snapshot copy MUST be recorded before clear_tail_in
+    // in the one step() encoder. (clear_tail_in zeroes the GPU tail for
+    // the current tick's producers; if the snapshot came after, it would
+    // capture 0 instead of the prior-tick producer count.)
+    let snap_pos = out
+        .find(snapshot_block)
+        .expect("snapshot copy missing");
     let clear_pos = out
         .find("self.event_ring.clear_tail_in(&mut encoder);")
         .expect("clear_tail_in missing in fold-only fixture");
     assert!(
-        snap_submit_pos < clear_pos,
-        "snapshot submit must precede clear_tail_in; got snap_submit_pos={snap_submit_pos}, clear_pos={clear_pos}",
+        snap_pos < clear_pos,
+        "snapshot copy must precede clear_tail_in; got snap_pos={snap_pos}, clear_pos={clear_pos}",
     );
 }
 
@@ -282,6 +268,7 @@ fn non_event_ring_kernel_does_not_get_snapshot_copy() {
         &[],
         false,
         false, // binds_navgrid
+        &[],
         &[],
         0,
         0,

@@ -1,196 +1,156 @@
-//! GPU radix sort emit — Stage A (LSD radix on seq) + Stage B (counting sort on target).
+//! GPU event-ring sort emit — ONE single-workgroup dispatch.
 //!
-//! Produces 15 WGSL kernels per opt-in fixture:
-//!   Stage A: 4 passes × {histogram, scan, scatter} = 12 kernels
-//!   Stage B: 1 × {count, scan, scatter}            = 3 kernels
+//! Sorts the prior-tick chronicle ring by `(target, seq)` so f32 view
+//! folds accumulate in a canonical order. The permutation is exactly
+//! the one the historical 15-kernel pipeline produced (4 LSD radix
+//! passes on the 32-bit `seq` trailer, then a stable counting sort on
+//! the clamped `target` word): every pass here is a stable 8-bit LSD
+//! radix pass, and the target passes run over the SAME clamped key
+//! (`min(target, agent_cap)`), so the final order is "by clamped
+//! target, then by seq, then by input order" in both designs.
 //!
-//! Output: `event_ring` permuted via ping-pong with
-//! `event_ring_sort_scratch`. After Stage B, all events with the same
-//! `target` are adjacent, intra-target seq-ordered.
-
-// Scatter kernels dispatch as @workgroup_size(1) for full
-// determinism: a single thread iterates events sequentially, so the
-// atomicAdd intra-bucket position is monotonic in input order.
+//! Why one dispatch: the ring is empty on most ticks, so the sort's
+//! cost was pure launch overhead — 15 dispatches (five of them a
+//! million threads wide, over the ring CAPACITY rather than its tail)
+//! plus a 46 MB copy of the whole ring back from the scratch buffer,
+//! every tick. This kernel is one 256-thread workgroup that walks
+//! `tail` records, ping-pongs ring ↔ scratch across the passes with
+//! workgroup + storage barriers, and copies only the live records
+//! back when the pass count is odd.
+//!
+//! Determinism: the only atomics are per-bucket COUNTS (commutative);
+//! every record's destination is `bucket_cursor + rank`, where `rank`
+//! is the number of earlier records in the same 256-record block with
+//! the same key — computed by an ordered scan, never by atomics.
+//!
+//! Workgroup memory: 4 × 256 × 4 B = 4 KiB, under every adapter's
+//! floor, so no limit negotiation is needed.
 
 use crate::cg::program::EventLayout;
 
-/// Emit Stage A pass `pass_idx` (0..4): histogram + scan + scatter.
-/// Each pass processes 8 bits of the seq key, starting from LSB.
-/// Returns the (histogram_wgsl, scan_wgsl, scatter_wgsl) triple.
-#[allow(dead_code)] // wired into the schedule by the build_helper in Task 3.6
-pub(crate) fn emit_stage_a_pass(pass_idx: u32, layout: &EventLayout) -> (String, String, String) {
-    // Four passes cover the full 32-bit seq field:
-    //   pass 0 → bits  0–7   (bit_shift =  0)
-    //   pass 1 → bits  8–15  (bit_shift =  8)
-    //   pass 2 → bits 16–23  (bit_shift = 16)
-    //   pass 3 → bits 24–31  (bit_shift = 24)
-    // LSD order (low-to-high) guarantees stability: the final pass
-    // leaves records in ascending seq order within each bucket.
+/// Entry-point / kernel name of the single sort dispatch.
+pub const SORT_KERNEL_NAME: &str = "event_ring_sort";
+
+/// Emit the complete WGSL module for the single-dispatch sort.
+///
+/// Bindings:
+/// * 0 — `event_ring` (storage, read_write): sorted in place.
+/// * 1 — `event_tail` (storage, read): live record count.
+/// * 2 — `scratch` (storage, read_write): ping-pong buffer, ≥ ring size.
+/// * 3 — `cfg` (uniform): `{ target_word_offset, agent_cap, _, _ }`.
+pub(crate) fn emit_single_dispatch_sort(layout: &EventLayout, ring_cap_slots: u32) -> String {
     let stride = layout.record_stride_u32;
-    let seq_offset = stride - 1;  // seq trailer is last word
-    let bit_shift = pass_idx * 8;
-    let bucket_mask = 0xFFu32;
-
-    // -- Histogram kernel.
-    let histogram = format!(r#"
-@group(0) @binding(0) var<storage, read> event_ring_in: array<atomic<u32>>;
-@group(0) @binding(1) var<storage, read> event_tail: atomic<u32>;
-@group(0) @binding(2) var<storage, read_write> radix_histogram: array<atomic<u32>>;
-
-@compute @workgroup_size(64)
-fn radix_stage_a_pass{pass_idx}_histogram(@builtin(global_invocation_id) gid: vec3<u32>) {{
-    let tid = gid.x;
-    let count = atomicLoad(&event_tail);
-    if (tid >= count) {{ return; }}
-
-    let seq = atomicLoad(&event_ring_in[tid * {stride}u + {seq_offset}u]);
-    let bucket = (seq >> {bit_shift}u) & {bucket_mask}u;
-    atomicAdd(&radix_histogram[bucket], 1u);
-}}
-"#);
-
-    // -- Scan kernel (exclusive prefix sum on 256 buckets).
-    let scan = format!(r#"
-@group(0) @binding(0) var<storage, read_write> radix_histogram: array<atomic<u32>>;
-@group(0) @binding(1) var<storage, read_write> radix_bucket_offsets: array<u32>;
-
-var<workgroup> scan_tmp: array<u32, 256>;
-
-@compute @workgroup_size(256)
-fn radix_stage_a_pass{pass_idx}_scan(@builtin(local_invocation_id) lid: vec3<u32>) {{
-    let i = lid.x;
-    scan_tmp[i] = atomicLoad(&radix_histogram[i]);
-    workgroupBarrier();
-
-    // Hillis-Steele exclusive scan.
-    var stride: u32 = 1u;
-    loop {{
-        if (stride >= 256u) {{ break; }}
-        let v = select(0u, scan_tmp[i - stride], i >= stride);
-        workgroupBarrier();
-        scan_tmp[i] = scan_tmp[i] + v;
-        workgroupBarrier();
-        stride = stride << 1u;
-    }}
-
-    // Shift to exclusive: position i gets scan_tmp[i-1] (or 0 for i=0).
-    let count_i = atomicLoad(&radix_histogram[i]);
-    radix_bucket_offsets[i] = select(scan_tmp[i] - count_i, 0u, i == 0u);
-
-    // Reset histogram counters for use as "next-position" during scatter.
-    atomicStore(&radix_histogram[i], 0u);
-}}
-"#);
-
-    // -- Scatter kernel — single-thread sequential iteration for determinism.
-    let scatter = format!(r#"
-@group(0) @binding(0) var<storage, read> event_ring_in: array<atomic<u32>>;
-@group(0) @binding(1) var<storage, read> event_tail: atomic<u32>;
-@group(0) @binding(2) var<storage, read_write> radix_histogram: array<atomic<u32>>;
-@group(0) @binding(3) var<storage, read> radix_bucket_offsets: array<u32>;
-@group(0) @binding(4) var<storage, read_write> event_ring_out: array<atomic<u32>>;
-
-@compute @workgroup_size(1)
-fn radix_stage_a_pass{pass_idx}_scatter(@builtin(local_invocation_id) lid: vec3<u32>) {{
-    let count = atomicLoad(&event_tail);
-    for (var tid = 0u; tid < count; tid = tid + 1u) {{
-        let seq = atomicLoad(&event_ring_in[tid * {stride}u + {seq_offset}u]);
-        let bucket = (seq >> {bit_shift}u) & {bucket_mask}u;
-        let intra = atomicAdd(&radix_histogram[bucket], 1u);
-        let dst = radix_bucket_offsets[bucket] + intra;
-        for (var w = 0u; w < {stride}u; w = w + 1u) {{
-            let v = atomicLoad(&event_ring_in[tid * {stride}u + w]);
-            atomicStore(&event_ring_out[dst * {stride}u + w], v);
-        }}
-    }}
-}}
-"#);
-
-    (histogram, scan, scatter)
-}
-
-/// Emit Stage B (single counting-sort pass on target_id):
-/// (count_wgsl, scan_wgsl, scatter_wgsl).
-#[allow(dead_code)] // wired into the schedule by the build_helper in Task 3.6
-pub(crate) fn emit_stage_b(layout: &EventLayout) -> (String, String, String) {
-    // Stage B is a counting sort keyed on target_id. The sort is stable
-    // because it preserves the seq ordering established by Stage A.
-    // The scan kernel runs single-threaded (workgroup_size(1)) because
-    // agent_cap is typically ≤ 4096 — a serial loop is faster than
-    // spinning up a parallel scan and paying the launch overhead.
-    // Target values that exceed agent_cap are clamped to the sentinel
-    // bucket so invalid/stale events don't corrupt the scatter.
-    let stride = layout.record_stride_u32;
-
-    let count = format!(r#"
+    let seq_offset = stride - 1; // seq trailer is the last word
+    format!(
+        r#"// GENERATED — single-dispatch stable radix sort of the chronicle ring
+// by (clamped target, seq). See dsl_compiler::cg::emit::sort_kernel.
 struct SortCfg {{ target_word_offset: u32, agent_cap: u32, _pad0: u32, _pad1: u32 }};
 
-@group(0) @binding(0) var<storage, read> event_ring_in: array<atomic<u32>>;
-@group(0) @binding(1) var<storage, read> event_tail: atomic<u32>;
-@group(0) @binding(2) var<storage, read_write> target_histogram: array<atomic<u32>>;
+@group(0) @binding(0) var<storage, read_write> ring: array<u32>;
+@group(0) @binding(1) var<storage, read> event_tail: array<u32>;
+@group(0) @binding(2) var<storage, read_write> scratch: array<u32>;
 @group(0) @binding(3) var<uniform> cfg: SortCfg;
 
-@compute @workgroup_size(64)
-fn radix_stage_b_count(@builtin(global_invocation_id) gid: vec3<u32>) {{
-    let tid = gid.x;
-    let count = atomicLoad(&event_tail);
-    if (tid >= count) {{ return; }}
+const STRIDE: u32 = {stride}u;
+const SEQ_OFFSET: u32 = {seq_offset}u;
+const WG: u32 = 256u;
+const RING_CAP: u32 = {ring_cap_slots}u;
 
-    let tgt = atomicLoad(&event_ring_in[tid * {stride}u + cfg.target_word_offset]);
-    let bucket = select(tgt, cfg.agent_cap, tgt >= cfg.agent_cap);
-    atomicAdd(&target_histogram[bucket], 1u);
+var<workgroup> hist: array<atomic<u32>, 256>;
+var<workgroup> cursor: array<u32, 256>;
+var<workgroup> blk_key: array<u32, 256>;
+var<workgroup> blk_cnt: array<atomic<u32>, 256>;
+
+fn load_word(from_ring: bool, i: u32) -> u32 {{
+    if (from_ring) {{ return ring[i]; }}
+    return scratch[i];
 }}
-"#);
 
-    let scan = format!(r#"
-struct SortCfg {{ target_word_offset: u32, agent_cap: u32, _pad0: u32, _pad1: u32 }};
+fn store_word(to_ring: bool, i: u32, v: u32) {{
+    if (to_ring) {{ ring[i] = v; }} else {{ scratch[i] = v; }}
+}}
 
-@group(0) @binding(0) var<storage, read_write> target_histogram: array<atomic<u32>>;
-@group(0) @binding(1) var<storage, read_write> target_offsets: array<u32>;
-@group(0) @binding(2) var<uniform> cfg: SortCfg;
-
-@compute @workgroup_size(1)
-fn radix_stage_b_scan(@builtin(local_invocation_id) lid: vec3<u32>) {{
-    // Single-thread serial scan — handles up to agent_cap+1 buckets
-    // (range [0, agent_cap] plus the sentinel at agent_cap).
-    if (lid.x != 0u) {{ return; }}
-    let cap_plus_one = cfg.agent_cap + 1u;
-    var running: u32 = 0u;
-    for (var i = 0u; i < cap_plus_one; i = i + 1u) {{
-        target_offsets[i] = running;
-        running = running + atomicLoad(&target_histogram[i]);
-        atomicStore(&target_histogram[i], 0u);  // reset for scatter
+// 8-bit key of record `r` for pass `p`: passes 0..3 walk the seq
+// trailer LSB-first; passes 4.. walk the CLAMPED target LSB-first.
+fn key_of(from_ring: bool, r: u32, p: u32) -> u32 {{
+    if (p < 4u) {{
+        let seq = load_word(from_ring, r * STRIDE + SEQ_OFFSET);
+        return (seq >> (p * 8u)) & 0xFFu;
     }}
+    let tgt = load_word(from_ring, r * STRIDE + cfg.target_word_offset);
+    let clamped = select(tgt, cfg.agent_cap, tgt >= cfg.agent_cap);
+    return (clamped >> ((p - 4u) * 8u)) & 0xFFu;
 }}
-"#);
 
-    let scatter = format!(r#"
-struct SortCfg {{ target_word_offset: u32, agent_cap: u32, _pad0: u32, _pad1: u32 }};
-
-@group(0) @binding(0) var<storage, read> event_ring_in: array<atomic<u32>>;
-@group(0) @binding(1) var<storage, read> event_tail: atomic<u32>;
-@group(0) @binding(2) var<storage, read_write> target_histogram: array<atomic<u32>>;
-@group(0) @binding(3) var<storage, read> target_offsets: array<u32>;
-@group(0) @binding(4) var<storage, read_write> event_ring_out: array<atomic<u32>>;
-@group(0) @binding(5) var<uniform> cfg: SortCfg;
-
-@compute @workgroup_size(1)
-fn radix_stage_b_scatter(@builtin(local_invocation_id) lid: vec3<u32>) {{
-    let count = atomicLoad(&event_tail);
-    for (var tid = 0u; tid < count; tid = tid + 1u) {{
-        let tgt = atomicLoad(&event_ring_in[tid * {stride}u + cfg.target_word_offset]);
-        let bucket = select(tgt, cfg.agent_cap, tgt >= cfg.agent_cap);
-        let intra = atomicAdd(&target_histogram[bucket], 1u);
-        let dst = target_offsets[bucket] + intra;
-        for (var w = 0u; w < {stride}u; w = w + 1u) {{
-            let v = atomicLoad(&event_ring_in[tid * {stride}u + w]);
-            atomicStore(&event_ring_out[dst * {stride}u + w], v);
+@compute @workgroup_size(256)
+fn {name}(@builtin(local_invocation_id) lid: vec3<u32>) {{
+    let t = lid.x;
+    let n = min(event_tail[0], RING_CAP);
+    // Enough 8-bit passes to cover every clamped target value
+    // (0 ..= agent_cap). agent_cap = 0 needs none: every key is 0.
+    let tbits = 32u - countLeadingZeros(cfg.agent_cap);
+    let tpasses = (tbits + 7u) / 8u;
+    let npasses = 4u + tpasses;
+    var from_ring = true;
+    for (var p = 0u; p < npasses; p = p + 1u) {{
+        // 1. Bucket histogram over the live records.
+        atomicStore(&hist[t], 0u);
+        workgroupBarrier();
+        for (var r = t; r < n; r = r + WG) {{
+            atomicAdd(&hist[key_of(from_ring, r, p)], 1u);
+        }}
+        workgroupBarrier();
+        // 2. Exclusive prefix sum → per-bucket write cursor.
+        if (t == 0u) {{
+            var running = 0u;
+            for (var b = 0u; b < 256u; b = b + 1u) {{
+                cursor[b] = running;
+                running = running + atomicLoad(&hist[b]);
+            }}
+        }}
+        workgroupBarrier();
+        // 3. Stable scatter, 256 records per block. A record's rank
+        //    inside its bucket is the count of EARLIER records in the
+        //    block with the same key (ordered scan, deterministic).
+        for (var base = 0u; base < n; base = base + WG) {{
+            let r = base + t;
+            let valid = r < n;
+            var k = 0xFFFFFFFFu;
+            if (valid) {{ k = key_of(from_ring, r, p); }}
+            blk_key[t] = k;
+            atomicStore(&blk_cnt[t], 0u);
+            workgroupBarrier();
+            if (valid) {{
+                var rank = 0u;
+                for (var u = 0u; u < t; u = u + 1u) {{
+                    if (blk_key[u] == k) {{ rank = rank + 1u; }}
+                }}
+                let dst = cursor[k] + rank;
+                for (var w = 0u; w < STRIDE; w = w + 1u) {{
+                    store_word(!from_ring, dst * STRIDE + w, load_word(from_ring, r * STRIDE + w));
+                }}
+                atomicAdd(&blk_cnt[k], 1u);
+            }}
+            workgroupBarrier();
+            cursor[t] = cursor[t] + atomicLoad(&blk_cnt[t]);
+            workgroupBarrier();
+        }}
+        storageBarrier();
+        workgroupBarrier();
+        from_ring = !from_ring;
+    }}
+    // An odd pass count leaves the sorted records in `scratch`; fold
+    // consumers read the canonical ring, so copy the LIVE records back.
+    if (!from_ring) {{
+        let words = n * STRIDE;
+        for (var i = t; i < words; i = i + WG) {{
+            ring[i] = scratch[i];
         }}
     }}
 }}
-"#);
-
-    (count, scan, scatter)
+"#,
+        name = SORT_KERNEL_NAME,
+    )
 }
 
 #[cfg(test)]
@@ -209,58 +169,38 @@ mod tests {
     }
 
     #[test]
-    fn stage_a_pass_0_emits_three_kernels() {
-        let lay = test_layout();
-        let (h, s, sc) = emit_stage_a_pass(0, &lay);
-        assert!(h.contains("radix_stage_a_pass0_histogram"));
-        assert!(s.contains("radix_stage_a_pass0_scan"));
-        assert!(sc.contains("radix_stage_a_pass0_scatter"));
+    fn emits_single_entry_point_named_event_ring_sort() {
+        let src = emit_single_dispatch_sort(&test_layout(), 1_048_576);
+        assert_eq!(src.matches("@compute").count(), 1, "exactly one entry point");
+        assert!(src.contains("fn event_ring_sort("));
+        assert!(src.contains("@workgroup_size(256)"));
     }
 
     #[test]
-    fn stage_a_pass_0_uses_low_8_bits_of_seq() {
-        let lay = test_layout();
-        let (h, _, _) = emit_stage_a_pass(0, &lay);
-        // bit_shift = 0 for pass 0
-        assert!(h.contains("(seq >> 0u) & 255u"));
+    fn reads_seq_at_last_word_and_target_via_cfg_offset() {
+        let src = emit_single_dispatch_sort(&test_layout(), 1_048_576);
+        assert!(src.contains("const STRIDE: u32 = 11u;"));
+        assert!(src.contains("const SEQ_OFFSET: u32 = 10u;"));
+        assert!(src.contains("cfg.target_word_offset"));
     }
 
     #[test]
-    fn stage_a_pass_3_uses_high_8_bits_of_seq() {
-        let lay = test_layout();
-        let (h, _, _) = emit_stage_a_pass(3, &lay);
-        // bit_shift = 24 for pass 3
-        assert!(h.contains("(seq >> 24u) & 255u"));
+    fn clamps_target_overflow_to_sentinel_bucket() {
+        let src = emit_single_dispatch_sort(&test_layout(), 1_048_576);
+        assert!(src.contains("select(tgt, cfg.agent_cap, tgt >= cfg.agent_cap)"));
     }
 
     #[test]
-    fn stage_a_reads_seq_at_last_word() {
-        let lay = test_layout();
-        let (h, _, _) = emit_stage_a_pass(0, &lay);
-        // seq_offset = stride - 1 = 10 (stride=11, last word index=10)
-        assert!(h.contains("tid * 11u + 10u"));
+    fn bounds_live_count_by_ring_capacity() {
+        let src = emit_single_dispatch_sort(&test_layout(), 4096);
+        assert!(src.contains("const RING_CAP: u32 = 4096u;"));
+        assert!(src.contains("min(event_tail[0], RING_CAP)"));
     }
 
     #[test]
-    fn stage_b_emits_three_kernels() {
-        let lay = test_layout();
-        let (c, s, sc) = emit_stage_b(&lay);
-        assert!(c.contains("radix_stage_b_count"));
-        assert!(s.contains("radix_stage_b_scan"));
-        assert!(sc.contains("radix_stage_b_scatter"));
-    }
-
-    #[test]
-    fn stage_b_uses_cfg_target_word_offset() {
-        let lay = test_layout();
-        let (c, _, _) = emit_stage_b(&lay);
-        assert!(c.contains("cfg.target_word_offset"));
-    }
-
-    #[test]
-    fn stage_b_handles_target_overflow_with_sentinel() {
-        let lay = test_layout();
-        let (c, _, _) = emit_stage_b(&lay);
-        assert!(c.contains("tgt >= cfg.agent_cap"));
+    fn copies_back_only_when_pass_count_is_odd() {
+        let src = emit_single_dispatch_sort(&test_layout(), 1_048_576);
+        assert!(src.contains("if (!from_ring) {"));
+        assert!(src.contains("ring[i] = scratch[i];"));
     }
 }

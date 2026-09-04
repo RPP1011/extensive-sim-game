@@ -20,16 +20,28 @@
 //! See `docs/superpowers/plans/2026-04-29-dsl-compute-graph-ir.md`,
 //! Task 3.2, for the design rationale.
 //!
+//! # Walk order (PERF, 2026-09-03)
+//!
+//! The walk is no longer "consecutive ops in topological order". It
+//! is a ready-set walk over an [`OrderingDag`]: starting from the
+//! best-effort topological order (the *reference* order — exactly what
+//! shipped before), every pair of ops whose declared accesses conflict
+//! (read-after-write, write-after-read, write-after-write on the same
+//! projected handle; a ring drain counts as a write) gets an edge in
+//! reference direction, and every op that is not a view fold or a view
+//! decay acts as a full barrier — those two kinds declare their accesses
+//! explicitly; a physics rule's derived set does not cover everything
+//! its body reads. Any topological order of that DAG runs every
+//! conflicting pair in the reference order — Bernstein's conditions —
+//! so it computes the same thing tick for tick. Among the ready ops the
+//! walk prefers one that can JOIN the open group, else the earliest in
+//! reference order, which reproduces the reference walk exactly when
+//! nothing can join. The effect: independent same-shape ops that the
+//! reference order interleaved with unrelated work (a fold and a decay
+//! per view, alternating) now land next to each other and fuse.
+//!
 //! # Limitations
 //!
-//! - **Consecutive-only fusion.** Fusion candidates are restricted to
-//!   ops that are *consecutive* in the topological order. Non-
-//!   consecutive but topologically-isolated ops (no intervening op that
-//!   depends on either side) could in principle fuse, but doing so
-//!   requires a richer reachability analysis than this first cut
-//!   performs. Task 3.3 (megakernel synthesis) will explore the wider
-//!   fusion surface; the structure of [`FusionGroup`] supports
-//!   non-contiguous op lists without a breaking change.
 //! - **WAW splits, WAR allowed.** Two adjacent ops with the same
 //!   dispatch shape that both *write* the same handle (write-after-
 //!   write) cause the analysis to start a new group — the hazard would
@@ -389,12 +401,77 @@ pub fn fusion_decisions_with_registry(
     let mut current_shape: Option<DispatchShape> = None;
     let mut current_writes: BTreeSet<CycleEdgeKey> = BTreeSet::new();
 
-    for op_id in topo_order {
+    // Ready-set walk over the ordering DAG (see the module doc, "Walk
+    // order"). `ready` is keyed by REFERENCE POSITION, so "the earliest
+    // ready op" is the next op of the reference walk whenever nothing
+    // can join the open group.
+    let order = OrderingDag::new(prog, &topo_order);
+    let mut remaining: Vec<usize> = order.pred_count.clone();
+    let mut ready: BTreeSet<usize> = (0..topo_order.len())
+        .filter(|&p| remaining[p] == 0)
+        .collect();
+
+    while let Some(&first) = ready.iter().next() {
+        let mut pick = first;
+        if !current_ops.is_empty() {
+            let mut joined = false;
+            for &p in &ready {
+                let Some(op) = prog.ops.get(topo_order[p].0 as usize) else {
+                    continue;
+                };
+                let w: BTreeSet<CycleEdgeKey> =
+                    op.writes.iter().map(|h| h.cycle_edge_key()).collect();
+                let decision = decide_join(
+                    prog,
+                    registry,
+                    &current_shape,
+                    &current_ops,
+                    &current_writes,
+                    op,
+                    &w,
+                );
+                if matches!(decision, JoinDecision::Join) {
+                    pick = p;
+                    joined = true;
+                    break;
+                }
+            }
+            // Nothing joins: keep like with like. Prefer the earliest
+            // ready op of the SAME op kind as the group being closed, so
+            // a fold/decay/fold/decay interleave drains as
+            // fold,fold,...,decay,decay,... and the decays land next to
+            // each other where they fuse. Any topological order of the
+            // DAG is legal; this only picks among them.
+            if !joined {
+                let last_kind = current_ops
+                    .last()
+                    .and_then(|id| prog.ops.get(id.0 as usize))
+                    .map(|op| std::mem::discriminant(&op.kind));
+                if let Some(last_kind) = last_kind {
+                    for &p in &ready {
+                        let Some(op) = prog.ops.get(topo_order[p].0 as usize) else {
+                            continue;
+                        };
+                        if std::mem::discriminant(&op.kind) == last_kind {
+                            pick = p;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        ready.remove(&pick);
+        for &succ in &order.succs[pick] {
+            remaining[succ] -= 1;
+            if remaining[succ] == 0 {
+                ready.insert(succ);
+            }
+        }
+        let op_id = topo_order[pick];
         let op = match prog.ops.get(op_id.0 as usize) {
             Some(op) => op,
-            // Defensive — `topological_sort` produces only in-range
-            // OpIds for a well-formed graph; skip silently if a
-            // malformed graph slips through (no panic).
+            // Defensive — the reference order carries only in-range
+            // OpIds for a well-formed graph; skip silently otherwise.
             None => continue,
         };
         let op_writes: BTreeSet<CycleEdgeKey> =
@@ -486,6 +563,114 @@ pub fn fusion_decisions_with_registry(
     }
 
     (groups, diagnostics)
+}
+
+// ---------------------------------------------------------------------------
+// OrderingDag — which reference-order pairs may NOT be swapped
+// ---------------------------------------------------------------------------
+
+/// The partial order the fusion walk must respect, derived from a
+/// reference (best-effort topological) order: an edge `i → j` for every
+/// pair with `i` before `j` in the reference whose declared accesses
+/// conflict. Positions index into the reference slice.
+///
+/// Conflicts are Bernstein's conditions on the projected handle keys
+/// (`cycle_edge_key`): `writes(i) ∩ (reads(j) ∪ writes(j))` or
+/// `reads(i) ∩ writes(j)` non-empty. A chronicle-ring DRAIN is treated
+/// as a write (it resets the tail every reader depends on). Every op
+/// that is not a view fold or a view decay is a BARRIER: it conflicts
+/// with everything, so it and everything around it keep their
+/// reference positions. Folds and decays declare their accesses
+/// explicitly; the derived sets of the other kinds are not a complete
+/// description of what their bodies touch.
+///
+/// Every topological order of this DAG is a legal schedule that
+/// computes what the reference order computes; the walk in
+/// [`fusion_decisions_with_registry`] picks among them for fusion.
+struct OrderingDag {
+    /// Successor positions per position.
+    succs: Vec<Vec<usize>>,
+    /// Predecessor count per position.
+    pred_count: Vec<usize>,
+}
+
+impl OrderingDag {
+    fn new(prog: &CgProgram, reference: &[OpId]) -> Self {
+        struct Access {
+            reads: BTreeSet<CycleEdgeKey>,
+            writes: BTreeSet<CycleEdgeKey>,
+            barrier: bool,
+        }
+        let access: Vec<Access> = reference
+            .iter()
+            .map(|id| match prog.ops.get(id.0 as usize) {
+                Some(op) => {
+                    // Only view folds and view decays move: their access
+                    // sets are declared explicitly (the fold's ring +
+                    // storage handles, the decay's storage handle). A
+                    // physics rule's derived set proved incomplete on
+                    // webband_colony (a rule summing thought views was
+                    // hoisted above the folds that fill them and the
+                    // fixture digest drifted), so every other kind is a
+                    // barrier that pins its neighbours.
+                    let barrier = !matches!(
+                        op.kind,
+                        ComputeOpKind::ViewFold { .. } | ComputeOpKind::ViewDecay { .. }
+                    );
+                    let mut reads = BTreeSet::new();
+                    let mut writes = BTreeSet::new();
+                    for h in &op.reads {
+                        let is_drain = matches!(
+                            h,
+                            DataHandle::EventRing {
+                                kind: crate::cg::data_handle::EventRingAccess::Drain,
+                                ..
+                            }
+                        );
+                        if is_drain {
+                            writes.insert(h.cycle_edge_key());
+                        } else {
+                            reads.insert(h.cycle_edge_key());
+                        }
+                    }
+                    for h in &op.writes {
+                        writes.insert(h.cycle_edge_key());
+                    }
+                    Access {
+                        reads,
+                        writes,
+                        barrier,
+                    }
+                }
+                None => Access {
+                    reads: BTreeSet::new(),
+                    writes: BTreeSet::new(),
+                    barrier: true,
+                },
+            })
+            .collect();
+        let n = reference.len();
+        let mut succs: Vec<Vec<usize>> = vec![Vec::new(); n];
+        let mut pred_count: Vec<usize> = vec![0; n];
+        for j in 0..n {
+            for i in 0..j {
+                let a = &access[i];
+                let b = &access[j];
+                let conflict = a.barrier
+                    || b.barrier
+                    || a
+                        .writes
+                        .iter()
+                        .any(|k| b.reads.contains(k) || b.writes.contains(k))
+                    || a.reads.iter().any(|k| b.writes.contains(k));
+                if conflict {
+                    succs[i].push(j);
+                    pred_count[j] += 1;
+                }
+            }
+        }
+        Self { succs, pred_count }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -792,6 +977,44 @@ fn cross_domain_split_decision(
         // before it runs. Pick a witness that names the decay's view-
         // storage handle so the diagnostic reads sensibly. Mirrors the
         // SpatialQuery special case directly above.
+        // PERF (2026-09-03): plain decays (no gate mask, no q8 packing)
+        // over DIFFERENT views are elementwise sweeps of disjoint
+        // storage. They fuse into one kernel — see
+        // `emit::kernel::KernelKindClass::ViewDecayFused`. Gated /
+        // packed decays keep the legacy singleton emitter.
+        (
+            ComputeOpKind::ViewDecay {
+                view: v1,
+                gate: None,
+                packing: 0,
+                ..
+            },
+            ComputeOpKind::ViewDecay {
+                view: v2,
+                gate: None,
+                packing: 0,
+                ..
+            },
+        ) if v1 != v2 => None,
+        // PERF (2026-09-03): plain decays (no gate mask, no q8 packing)
+        // over DIFFERENT views are elementwise sweeps of disjoint
+        // storage. They fuse into one kernel — see
+        // `emit::kernel::KernelKindClass::ViewDecayFused`. Gated /
+        // packed decays keep the legacy singleton emitter.
+        (
+            ComputeOpKind::ViewDecay {
+                view: v1,
+                gate: None,
+                packing: 0,
+                ..
+            },
+            ComputeOpKind::ViewDecay {
+                view: v2,
+                gate: None,
+                packing: 0,
+                ..
+            },
+        ) if v1 != v2 => None,
         (ComputeOpKind::ViewDecay { .. }, _) | (_, ComputeOpKind::ViewDecay { .. }) => {
             let witness = prev
                 .writes

@@ -110,15 +110,20 @@ fn bg_source_to_buf_expr(src: &BgSource, _all: &[KernelBinding]) -> String {
 pub fn lower_rust_bg_entries(spec: &KernelSpec) -> String {
     let mut out = String::new();
     for b in &spec.bindings {
-        let buf_expr = match &b.bg_source {
-            BgSource::Cfg => format!("bindings.{}", b.name),
-            BgSource::AliasOf(target) => format!("bindings.{}", target),
-            _ => format!("bindings.{}", b.name),
+        // The cfg binding is a slice of the runtime's consolidated cfg
+        // buffer (a `wgpu::BufferBinding`); everything else is a whole
+        // buffer.
+        let sliced = matches!(b.bg_source, BgSource::Cfg)
+            || crate::kernel_binding_ir::is_mask_bitmap_binding(&b.name);
+        let resource_expr = match &b.bg_source {
+            BgSource::AliasOf(target) => format!("bindings.{}.as_entire_binding()", target),
+            _ if sliced => format!("wgpu::BindingResource::Buffer(bindings.{}.clone())", b.name),
+            _ => format!("bindings.{}.as_entire_binding()", b.name),
         };
         writeln!(
             out,
-            "                wgpu::BindGroupEntry {{ binding: {}, resource: {}.as_entire_binding() }},",
-            b.slot, buf_expr
+            "                wgpu::BindGroupEntry {{ binding: {}, resource: {} }},",
+            b.slot, resource_expr
         )
         .unwrap();
     }
@@ -140,7 +145,13 @@ pub fn lower_rust_bindings_struct_fields(spec: &KernelSpec) -> String {
         if matches!(b.bg_source, BgSource::AliasOf(_)) {
             continue;
         }
-        writeln!(out, "    pub {}: &'a wgpu::Buffer,", b.name).unwrap();
+        if matches!(b.bg_source, BgSource::Cfg)
+            || crate::kernel_binding_ir::is_mask_bitmap_binding(&b.name)
+        {
+            writeln!(out, "    pub {}: wgpu::BufferBinding<'a>,", b.name).unwrap();
+        } else {
+            writeln!(out, "    pub {}: &'a wgpu::Buffer,", b.name).unwrap();
+        }
     }
     out
 }
@@ -250,7 +261,7 @@ mod tests {
             "wgpu::BindGroupEntry { binding: 1, resource: bindings.mask_bitmaps.as_entire_binding() }"
         ));
         assert!(rs.contains(
-            "wgpu::BindGroupEntry { binding: 2, resource: bindings.cfg.as_entire_binding() }"
+            "wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Buffer(bindings.cfg.clone()) }"
         ));
     }
 
@@ -260,7 +271,7 @@ mod tests {
         let rs = lower_rust_bindings_struct_fields(&spec);
         assert!(rs.contains("pub agents: &'a wgpu::Buffer,"));
         assert!(rs.contains("pub mask_bitmaps: &'a wgpu::Buffer,"));
-        assert!(rs.contains("pub cfg: &'a wgpu::Buffer,"));
+        assert!(rs.contains("pub cfg: wgpu::BufferBinding<'a>,"));
     }
 
     #[test]

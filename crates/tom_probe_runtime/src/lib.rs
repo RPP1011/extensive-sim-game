@@ -944,7 +944,7 @@ impl TomProbeState {
             beliefs_type: &self.beliefs_type_primary,
             beliefs_tick: &self.beliefs_tick_primary,
             beliefs_confidence: &self.beliefs_confidence_primary,
-            cfg: &self.apply_observe_cfg_buf,
+            cfg: self.apply_observe_cfg_buf.as_entire_buffer_binding(),
         };
         let bindings =
             physics_ApplyObserveBeliefUpdate::PhysicsApplyObserveBeliefUpdateBindings::from_context_with_extras(
@@ -1029,7 +1029,7 @@ impl TomProbeState {
             beliefs_confidence: &self.beliefs_confidence_primary,
             beliefs_suspicion: &self.beliefs_suspicion_primary,
             beliefs_flags: &self.beliefs_flags_primary,
-            cfg: &self.apply_scry_cfg_buf,
+            cfg: self.apply_scry_cfg_buf.as_entire_buffer_binding(),
         };
         let bindings =
             physics_ApplyScryBeliefUpdate::PhysicsApplyScryBeliefUpdateBindings::from_context_with_extras(
@@ -1121,7 +1121,7 @@ impl TomProbeState {
             beliefs_confidence: &self.beliefs_confidence_primary,
             beliefs_suspicion: &self.beliefs_suspicion_primary,
             beliefs_flags: &self.beliefs_flags_primary,
-            cfg: &self.apply_reveal_cfg_buf,
+            cfg: self.apply_reveal_cfg_buf.as_entire_buffer_binding(),
         };
         let bindings =
             physics_ApplyRevealBeliefUpdate::PhysicsApplyRevealBeliefUpdateBindings::from_context_with_extras(
@@ -1212,7 +1212,7 @@ impl TomProbeState {
             beliefs_type: &self.beliefs_type_primary,
             beliefs_tick: &self.beliefs_tick_primary,
             beliefs_confidence: &self.beliefs_confidence_primary,
-            cfg: &self.apply_decoy_cfg_buf,
+            cfg: self.apply_decoy_cfg_buf.as_entire_buffer_binding(),
         };
         let bindings =
             physics_ApplyDecoyBeliefUpdate::PhysicsApplyDecoyBeliefUpdateBindings::from_context_with_extras(
@@ -1302,7 +1302,7 @@ impl TomProbeState {
             beliefs_confidence: &self.beliefs_confidence_primary,
             beliefs_suspicion: &self.beliefs_suspicion_primary,
             beliefs_flags: &self.beliefs_flags_primary,
-            cfg: &self.apply_erase_belief_cfg_buf,
+            cfg: self.apply_erase_belief_cfg_buf.as_entire_buffer_binding(),
         };
         let bindings = physics_ApplyEraseBeliefUpdate_and_ApplyDisguise::PhysicsApplyEraseBeliefUpdateAndApplyDisguiseBindings::from_context_with_extras(
             &ctx, &extras,
@@ -1391,7 +1391,7 @@ impl TomProbeState {
             beliefs_confidence: &self.beliefs_confidence_primary,
             beliefs_suspicion: &self.beliefs_suspicion_primary,
             beliefs_flags: &self.beliefs_flags_primary,
-            cfg: &self.apply_disguise_cfg_buf,
+            cfg: self.apply_disguise_cfg_buf.as_entire_buffer_binding(),
         };
         let bindings = physics_ApplyEraseBeliefUpdate_and_ApplyDisguise::PhysicsApplyEraseBeliefUpdateAndApplyDisguiseBindings::from_context_with_extras(
             &ctx, &extras,
@@ -1596,7 +1596,7 @@ impl CompiledSim for TomProbeState {
                 navgrid_cfg: None,
             };
             let physics_extras = physics_WhatIBelieve::PhysicsWhatIBelieveExtras {
-                cfg: &self.physics_cfg_buf,
+                cfg: self.physics_cfg_buf.as_entire_buffer_binding(),
             };
             let physics_bindings =
                 physics_WhatIBelieve::PhysicsWhatIBelieveBindings::from_context_with_extras(
@@ -1632,7 +1632,7 @@ impl CompiledSim for TomProbeState {
             view_storage_anchor: None,
             view_storage_ids: None,
             sim_cfg: self.event_ring.sim_cfg(),
-            cfg: &self.fold_cfg_buf,
+            cfg: self.fold_cfg_buf.as_entire_buffer_binding(),
         };
         dispatch::dispatch_fold_beliefs_flags(
             &mut self.cache,

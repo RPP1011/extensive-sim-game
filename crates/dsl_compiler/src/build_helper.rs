@@ -613,18 +613,18 @@ fn emit_into(
     )
     .unwrap_or_else(|e| panic!("emit {fixture_name} CG program: {e:?}"));
 
-    // Sort-kernel opt-in: inject 15 sort kernels (4 × 3 Stage A passes +
-    // 3 Stage B kernels) for any fixture that has at least one f32 view
-    // fold. The kernels are complete WGSL files (own bindings + entry
-    // point) emitted by cg::emit::sort_kernel; they bypass the normal
+    // Sort-kernel opt-in: inject the single-dispatch event-ring sort for
+    // any fixture that has at least one f32 view fold. The kernel is a
+    // complete WGSL file (own bindings + entry point) emitted by
+    // cg::emit::sort_kernel; it bypasses the normal
     // kernel_topology_to_spec_and_body pipeline.
     let sort_layout = sort_layout_for_fixture(&cg);
     let needs_sort = sort_layout.is_some();
     if let Some(ref layout) = sort_layout {
         inject_sort_kernels(&mut artifacts, layout);
         println!(
-            "cargo:warning=[{fixture_name} sort-kernels] injected 15 radix sort kernels \
-             (stride={stride}, target_word={tgt})",
+            "cargo:warning=[{fixture_name} sort-kernels] injected the single-dispatch \
+             event-ring sort (stride={stride}, target_word={tgt})",
             stride = layout.record_stride_u32,
             tgt = sort_target_word_offset(layout),
         );
@@ -646,6 +646,18 @@ fn emit_into(
         println!(
             "cargo:warning=[{fixture_name} emit-stats]   {kernel_name}: {bytes} B, {bindings} bindings",
         );
+    }
+
+    // PERF (2026-09-03): ViewFold consumers read the prior-tick tail
+    // snapshot straight from their `event_tail` binding (the runtime
+    // points that binding at `prev_event_tail_buf` for exactly these
+    // kernels) instead of from a cfg word the runtime used to fill
+    // with one 4-byte copy per fold per tick. Same value, zero copies.
+    let prev_tail_fold_kernel_names = view_fold_prev_tail_kernel_names(&artifacts);
+    for kname in &prev_tail_fold_kernel_names {
+        if let Some(src) = artifacts.wgsl_files.get_mut(&format!("{kname}.wgsl")) {
+            *src = src.replace("cfg.event_count", "event_tail[0u]");
+        }
     }
 
     for (name, body) in &artifacts.wgsl_files {
@@ -897,6 +909,7 @@ fn emit_into(
         binds_voxel_grid,
         binds_navgrid,
         &indirect_consumer_kernel_names,
+        &prev_tail_fold_kernel_names,
         item_entity_count,
         group_entity_count,
         needs_sort,
@@ -1694,7 +1707,7 @@ fn sort_target_word_offset(layout: &crate::cg::program::EventLayout) -> u32 {
 /// Stage B phases) and minimal Rust stub modules into `artifacts`.
 ///
 /// The 15 kernels are complete WGSL files produced by
-/// `cg::emit::sort_kernel::{emit_stage_a_pass, emit_stage_b}`; they
+/// `cg::emit::sort_kernel::emit_single_dispatch_sort`; it
 /// include their own `@group(0) @binding(N)` declarations and
 /// `@compute @workgroup_size(...)` entry points. They therefore bypass
 /// the normal `compose_wgsl_file` wrapper and are inserted directly into
@@ -1707,43 +1720,55 @@ fn inject_sort_kernels(
     artifacts: &mut crate::cg::emit::EmittedArtifacts,
     layout: &crate::cg::program::EventLayout,
 ) {
-    use crate::cg::emit::sort_kernel::{emit_stage_a_pass, emit_stage_b};
+    use crate::cg::emit::sort_kernel::{emit_single_dispatch_sort, SORT_KERNEL_NAME};
 
-    // Stage A: 4 passes × 3 phases = 12 kernels.
-    for pass_idx in 0..4u32 {
-        let (hist_wgsl, scan_wgsl, scatter_wgsl) = emit_stage_a_pass(pass_idx, layout);
-        for (phase, wgsl) in [
-            ("histogram", hist_wgsl),
-            ("scan", scan_wgsl),
-            ("scatter", scatter_wgsl),
-        ] {
-            let name = format!("radix_stage_a_pass{}_{}", pass_idx, phase);
-            artifacts.wgsl_files.insert(format!("{name}.wgsl"), wgsl);
-            artifacts.rust_files.insert(format!("{name}.rs"), sort_kernel_stub_rs(&name));
-            artifacts.kernel_index.push(name);
-        }
-    }
-
-    // Stage B: 3 phases = 3 kernels.
-    let (count_wgsl, scan_wgsl, scatter_wgsl) = emit_stage_b(layout);
-    for (phase, wgsl) in [
-        ("count", count_wgsl),
-        ("scan", scan_wgsl),
-        ("scatter", scatter_wgsl),
-    ] {
-        let name = format!("radix_stage_b_{}", phase);
-        artifacts.wgsl_files.insert(format!("{name}.wgsl"), wgsl);
-        artifacts.rust_files.insert(format!("{name}.rs"), sort_kernel_stub_rs(&name));
-        artifacts.kernel_index.push(name);
-    }
+    // PERF (2026-09-03): the sort used to be 15 kernels (4 LSD radix
+    // passes × {histogram, scan, scatter} + a counting sort on target)
+    // plus a copy of the ENTIRE 46 MB ring back from scratch — every
+    // tick, even when the ring was empty (which is the median tick).
+    // It is now one single-workgroup dispatch producing the identical
+    // permutation; see `cg::emit::sort_kernel`.
+    let wgsl = emit_single_dispatch_sort(layout, engine::gpu::EVENT_RING_CAP_SLOTS);
+    let name = SORT_KERNEL_NAME.to_string();
+    artifacts.wgsl_files.insert(format!("{name}.wgsl"), wgsl);
+    artifacts.rust_files.insert(format!("{name}.rs"), sort_kernel_stub_rs(&name));
+    artifacts.kernel_index.push(name);
 }
 
-/// Minimal Rust stub for a sort kernel module. The stub compiles cleanly
-/// inside `pub mod {name} { ... }` (the `wrap_module` wrapper in `emit_into`)
-/// and provides a `SHADER_SRC` const so any code scanning for that pattern
-/// can find the associated WGSL file. No Kernel trait impl is emitted —
-/// sort kernels are driven directly by the runtime without going through the
-/// compiler-synthesized dispatch plumbing.
+/// ViewFold kernels whose `event_tail` binding the runtime points at the
+/// prior-tick tail snapshot (`prev_event_tail_buf`) and whose WGSL reads
+/// its event count from that binding (`event_tail[0u]`) instead of
+/// `cfg.event_count`. The two sources always held the same value — the
+/// runtime copied the snapshot into every such kernel's cfg word, one
+/// 4-byte `copy_buffer_to_buffer` per fold per tick (43 on a colony-sized
+/// fixture). Restricted to kernels that declare the tail READ-ONLY
+/// (`var<storage, read> event_tail: array<u32>`): an emitter that appends
+/// through the tail must keep the live counter.
+fn view_fold_prev_tail_kernel_names(
+    artifacts: &crate::cg::emit::EmittedArtifacts,
+) -> Vec<String> {
+    use crate::kernel_binding_ir::KernelKind;
+    artifacts
+        .kernel_specs
+        .iter()
+        .filter(|spec| {
+            if !matches!(spec.kind, KernelKind::ViewFold) {
+                return false;
+            }
+            if !spec.bindings.iter().any(|b| b.name == "event_tail") {
+                return false;
+            }
+            let Some(src) = artifacts.wgsl_files.get(&format!("{}.wgsl", spec.name)) else {
+                return false;
+            };
+            !src.contains("workgroup_size(8, 8)")
+                && src.contains("var<storage, read> event_tail: array<u32>;")
+                && src.contains("cfg.event_count")
+        })
+        .map(|spec| spec.name.clone())
+        .collect()
+}
+
 fn sort_kernel_stub_rs(name: &str) -> String {
     format!(
         "// Sort kernel stub — WGSL is a complete shader, not a body fragment.\n\
@@ -1818,6 +1843,7 @@ pub fn synthesize_runtime_core_a2(
     binds_voxel_grid: bool,
     binds_navgrid: bool,
     indirect_consumer_kernel_names: &[String],
+    prev_tail_fold_kernel_names: &[String],
     // Gap T2 fix (2026-05-12): per-Item / per-Group field bindings
     // (named `item_<field>` / `group_<field>`) need their backing
     // buffers sized to one slot per Item-rooted (resp. Group-rooted)
@@ -1929,6 +1955,7 @@ pub fn synthesize_runtime_core_a2(
         binds_voxel_grid,
         binds_navgrid,
         indirect_consumer_kernel_names,
+        prev_tail_fold_kernel_names,
         item_entity_count,
         group_entity_count,
         needs_sort,
@@ -2229,6 +2256,26 @@ fn slot_count_expr_for_spatial_grid_buffer(binding_name: &str) -> Option<String>
 /// Falls back to the legacy [`view_name_from_kernel_name`] string
 /// parser for kernels with no ViewHandle binding (mostly defensive;
 /// view-storage-touching kernels always have one).
+/// Views of a fused decay kernel (`KernelKindClass::ViewDecayFused`), in
+/// member (= binding slot) order, recovered from the
+/// `fold_view_<view>_handles` accessors of its storage bindings. A
+/// singleton decay yields one entry; anything else, none.
+fn fused_decay_member_views(spec: &crate::kernel_binding_ir::KernelSpec) -> Vec<&str> {
+    use crate::kernel_binding_ir::{BgSource, KernelKind};
+    if !matches!(spec.kind, KernelKind::ViewDecay) {
+        return Vec::new();
+    }
+    spec.bindings
+        .iter()
+        .filter_map(|b| match &b.bg_source {
+            BgSource::ViewHandle { accessor, .. } => accessor
+                .strip_prefix("fold_view_")
+                .and_then(|rest| rest.strip_suffix("_handles")),
+            _ => None,
+        })
+        .collect()
+}
+
 fn view_name_from_kernel_spec(spec: &crate::kernel_binding_ir::KernelSpec) -> Option<&str> {
     use crate::kernel_binding_ir::BgSource;
     for b in &spec.bindings {
@@ -2536,6 +2583,7 @@ fn synthesize_generated_runtime_struct(
     binds_voxel_grid: bool,
     binds_navgrid: bool,
     indirect_consumer_kernel_names: &[String],
+    prev_tail_fold_kernel_names: &[String],
     item_entity_count: u32,
     group_entity_count: u32,
     needs_sort: bool,
@@ -2645,23 +2693,61 @@ fn synthesize_generated_runtime_struct(
         out.push_str(&format!("{indent}}}\n"));
         out
     };
+    // Slot domain of one view: `agent_count` for single-key views,
+    // `agent_count * K` for pair-keyed ones.
+    let view_domain_expr = |view: &str| -> String {
+        if let Some(Some(pk)) = view_pair_keyed.get(view).map(|o| o.as_ref()) {
+            let k = match pk {
+                PairKeyedSecondKey::Agent => "self.agent_count".to_string(),
+                PairKeyedSecondKey::Item(n)
+                | PairKeyedSecondKey::Group(n)
+                | PairKeyedSecondKey::Quest(n)
+                | PairKeyedSecondKey::KeyTyped(n) => format!("{n}u32"),
+            };
+            return format!("self.agent_count * {k}");
+        }
+        "self.agent_count".to_string()
+    };
     let view_kernel_domain_expr = |spec: &crate::kernel_binding_ir::KernelSpec| -> String {
         use crate::kernel_binding_ir::KernelKind;
+        if matches!(spec.kind, KernelKind::ViewDecay) {
+            // PERF (2026-09-03): a fused decay kernel dispatches over its
+            // LARGEST member's domain; each member guards its own slot
+            // count (see `cfg.slot_count_<i>` below).
+            let members = fused_decay_member_views(spec);
+            if members.len() >= 2 {
+                let domains: Vec<String> = members.iter().map(|v| view_domain_expr(v)).collect();
+                return format!(
+                    "[{}].into_iter().max().unwrap_or(self.agent_count)",
+                    domains.join(", ")
+                );
+            }
+        }
         if matches!(spec.kind, KernelKind::ViewFold | KernelKind::ViewDecay) {
             if let Some(view) = view_name_from_kernel_spec(spec) {
-                if let Some(Some(pk)) = view_pair_keyed.get(view).map(|o| o.as_ref()) {
-                    let k = match pk {
-                        PairKeyedSecondKey::Agent => "self.agent_count".to_string(),
-                        PairKeyedSecondKey::Item(n)
-                        | PairKeyedSecondKey::Group(n)
-                        | PairKeyedSecondKey::Quest(n)
-                        | PairKeyedSecondKey::KeyTyped(n) => format!("{n}u32"),
-                    };
-                    return format!("self.agent_count * {k}");
-                }
+                return view_domain_expr(view);
             }
         }
         "self.agent_count".to_string()
+    };
+
+    // PERF (2026-09-03): a pair-keyed serial-scan fold marked
+    // `// fold-rows` dispatches one thread per observer row (see
+    // `emit::kernel::try_build_serial_scan_body`); its cfg.agent_cap
+    // keeps the full slot domain (`view_kernel_domain_expr`).
+    let view_kernel_dispatch_expr = |spec: &crate::kernel_binding_ir::KernelSpec| -> String {
+        use crate::kernel_binding_ir::KernelKind;
+        if matches!(spec.kind, KernelKind::ViewFold) {
+            let rows = artifacts
+                .wgsl_files
+                .get(&format!("{}.wgsl", spec.name))
+                .map(|src| src.contains("// fold-rows"))
+                .unwrap_or(false);
+            if rows {
+                return "self.agent_count".to_string();
+            }
+        }
+        view_kernel_domain_expr(spec)
     };
 
     // Fold consumer detection. Used to decide
@@ -2823,26 +2909,43 @@ fn synthesize_generated_runtime_struct(
     }
 
     let mut out = String::new();
-    // Radix sort pipeline cache struct — emitted only for fixtures that opt
-    // into the sort pass. Defined before GeneratedRuntime so it can appear
-    // as a field type.
+    // PERF (2026-09-03): one uniform buffer holds every kernel's cfg
+    // block at a 256-byte stride (the WebGPU floor for
+    // `min_uniform_buffer_offset_alignment`). The runtime used to own one
+    // 64-byte buffer per kernel and issue one `queue.write_buffer` per
+    // kernel per tick — ~200 tiny staging copies on a colony-sized
+    // fixture, a flat host + GPU cost that never shrank with the
+    // population. Each kernel binds its slot as a `BufferBinding`
+    // slice; the host mirror is uploaded with a single write.
+    if !cfg_buffer_names.is_empty() {
+        out.push_str("pub const CFG_SLOT_BYTES: u64 = 256;\n");
+        for (i, kernel_name) in cfg_buffer_names.iter().enumerate() {
+            out.push_str(&format!(
+                "#[allow(non_upper_case_globals)]\npub const CFG_OFF_{kernel_name}: u64 = {off};\n",
+                off = (i as u64) * 256,
+            ));
+        }
+        out.push('\n');
+        for spec in &artifacts.kernel_specs {
+            let bytes = 16 + 4 * spec.runtime_cfg_fields.len();
+            assert!(
+                bytes <= 256,
+                "kernel `{}` cfg struct is {bytes} bytes; the consolidated cfg buffer \
+                 slots are 256 bytes (raise CFG_SLOT_BYTES)",
+                spec.name
+            );
+        }
+    }
+    // Sort pipeline cache — emitted only for fixtures that opt into the
+    // sort pass. Defined before GeneratedRuntime so it can appear as a
+    // field type. One pipeline, one bind group: every binding is a
+    // runtime-owned buffer that never changes, so the group is built
+    // once with the pipeline.
     if needs_sort {
         out.push_str(
             "struct SortPipelines {\n\
-             \x20   // Stage A: 4 passes × (histogram, scan, scatter) = 12 pipelines\n",
-        );
-        for pass in 0..4u32 {
-            for phase in &["histogram", "scan", "scatter"] {
-                out.push_str(&format!(
-                    "    stage_a_pass{pass}_{phase}: (wgpu::ComputePipeline, wgpu::BindGroupLayout),\n",
-                ));
-            }
-        }
-        out.push_str(
-            "    // Stage B: count, scan, scatter = 3 pipelines\n\
-             \x20   stage_b_count: (wgpu::ComputePipeline, wgpu::BindGroupLayout),\n\
-             \x20   stage_b_scan:  (wgpu::ComputePipeline, wgpu::BindGroupLayout),\n\
-             \x20   stage_b_scatter: (wgpu::ComputePipeline, wgpu::BindGroupLayout),\n\
+             \x20   pipeline: wgpu::ComputePipeline,\n\
+             \x20   bind_group: wgpu::BindGroup,\n\
              }\n\n",
         );
     }
@@ -2884,13 +2987,42 @@ fn synthesize_generated_runtime_struct(
         out.push_str("    pub debug_timings: Option<dispatch::DebugTimings>,\n");
     }
     for (name, _ty) in &owned {
+        if crate::kernel_binding_ir::is_mask_bitmap_binding(name) {
+            continue;
+        }
         out.push_str(&format!("    pub {name}_buf: wgpu::Buffer,\n"));
+    }
+    // PERF (2026-09-03): every mask bitmap in one buffer (256-byte-aligned
+    // slots, one `clear_buffer` per tick instead of one per mask).
+    let mask_slot_count: u64 = owned
+        .keys()
+        .filter_map(|n| crate::kernel_binding_ir::mask_bitmap_id(n))
+        .map(|id| id as u64 + 1)
+        .max()
+        .unwrap_or(0);
+    if mask_slot_count > 0 {
+        out.push_str(
+            "    /// Every mask bitmap, at `mask_slot_bytes` stride (mask id = slot).\n\
+             \x20   pub mask_bitmaps_buf: wgpu::Buffer,\n\
+             \x20   /// Stride between mask slots (mask_bytes rounded up to 256).\n\
+             \x20   pub mask_slot_bytes: u64,\n\
+             \x20   /// Bytes one mask bitmap binding covers.\n\
+             \x20   pub mask_bytes: u64,\n",
+        );
     }
     // Per-kernel cfg buffers (Plan E-A4). One per kernel with a
     // Cfg-source binding. Named `cfg_<kernel>_buf` to avoid
     // collisions with fixture-owned buffers.
-    for kernel_name in &cfg_buffer_names {
-        out.push_str(&format!("    pub cfg_{kernel_name}_buf: wgpu::Buffer,\n"));
+    if !cfg_buffer_names.is_empty() {
+        out.push_str(
+            "    /// Every kernel's cfg block, one 256-byte slot each (see\n\
+             \x20   /// `CFG_OFF_*`). Written ONCE per tick from `cfg_shadow`.\n\
+             \x20   pub cfg_all_buf: wgpu::Buffer,\n\
+             \x20   /// Host mirror of `cfg_all_buf`; every per-kernel cfg write\n\
+             \x20   /// lands here and the whole block is uploaded in one\n\
+             \x20   /// `write_buffer` per tick.\n\
+             \x20   cfg_shadow: Vec<u8>,\n",
+        );
     }
     // 4-byte side buffer holding the snapshotted
     // GPU `event_tail` value from the END of the previous tick. Only
@@ -2903,6 +3035,16 @@ fn synthesize_generated_runtime_struct(
     // value into each fold's `cfg.event_count` slot.
     if has_fold_consumers_outer {
         out.push_str("    pub prev_event_tail_buf: wgpu::Buffer,\n");
+    }
+    // Only fixtures with indirect (chronicle) consumers reset the tail to
+    // a host-injected count; the rest clear it in-encoder.
+    let has_indirect_consumers_outer = !indirect_consumer_kernel_names.is_empty();
+    if has_indirect_consumers_outer {
+        out.push_str(
+            "    /// Host-injected chronicle count for the coming tick; copied onto\n\
+             \x20   /// the GPU tail inside the step encoder (see step()).\n\
+             \x20   pub pending_tail_buf: wgpu::Buffer,\n",
+        );
     }
     // Voxel terrain + GPU mirror — only allocated when the fixture has at
     // least one kernel that binds `voxel_grid`. Without this gate the
@@ -2930,10 +3072,6 @@ fn synthesize_generated_runtime_struct(
     // target-grouped, seq-ordered events.
     if needs_sort {
         out.push_str("    pub event_ring_sort_scratch_buf: wgpu::Buffer,\n");
-        out.push_str("    pub radix_histogram_buf: wgpu::Buffer,\n");
-        out.push_str("    pub radix_bucket_offsets_buf: wgpu::Buffer,\n");
-        out.push_str("    pub target_histogram_buf: wgpu::Buffer,\n");
-        out.push_str("    pub target_offsets_buf: wgpu::Buffer,\n");
         out.push_str("    pub sort_cfg_buf: wgpu::Buffer,\n");
         out.push_str("    sort_pipelines: Option<SortPipelines>,\n");
     }
@@ -2992,8 +3130,6 @@ fn synthesize_generated_runtime_struct(
     // Radix sort scratch buffers. Sizes:
     //   - sort scratch: same capacity as event_ring
     //     (EVENT_RING_CAP_SLOTS * stride * 4 bytes)
-    //   - radix_histogram / radix_bucket_offsets: 256 × 4 = 1024 bytes
-    //   - target_histogram / target_offsets: (agent_count + 1) × 4 bytes
     //   - sort_cfg: 16 bytes (4 × u32 = { target_word_offset, agent_cap, _pad0, _pad1 })
     if needs_sort {
         let stride = sort_event_layout
@@ -3008,31 +3144,7 @@ fn synthesize_generated_runtime_struct(
             "        let event_ring_sort_scratch_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
              \x20           label: Some(\"{fixture_name}::event_ring_sort_scratch\"),\n\
              \x20           size: {sort_scratch_bytes}u64,\n\
-             \x20           usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,\n\
-             \x20           mapped_at_creation: false,\n\
-             \x20       }});\n\
-             \x20       let radix_histogram_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
-             \x20           label: Some(\"{fixture_name}::radix_histogram\"),\n\
-             \x20           size: 256u64 * 4u64,\n\
-             \x20           usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,\n\
-             \x20           mapped_at_creation: false,\n\
-             \x20       }});\n\
-             \x20       let radix_bucket_offsets_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
-             \x20           label: Some(\"{fixture_name}::radix_bucket_offsets\"),\n\
-             \x20           size: 256u64 * 4u64,\n\
-             \x20           usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,\n\
-             \x20           mapped_at_creation: false,\n\
-             \x20       }});\n\
-             \x20       let target_histogram_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
-             \x20           label: Some(\"{fixture_name}::target_histogram\"),\n\
-             \x20           size: (agent_count as u64 + 1u64) * 4u64,\n\
-             \x20           usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,\n\
-             \x20           mapped_at_creation: false,\n\
-             \x20       }});\n\
-             \x20       let target_offsets_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
-             \x20           label: Some(\"{fixture_name}::target_offsets\"),\n\
-             \x20           size: (agent_count as u64 + 1u64) * 4u64,\n\
-             \x20           usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,\n\
+             \x20           usage: wgpu::BufferUsages::STORAGE,\n\
              \x20           mapped_at_creation: false,\n\
              \x20       }});\n\
              \x20       let sort_cfg_init: [u32; 4] = [{target_word}u32, agent_count, 0u32, 0u32];\n\
@@ -3131,7 +3243,21 @@ fn synthesize_generated_runtime_struct(
     // compile-time constants (literals or resolved `config.*`).
     let spawn_seeded_cols: std::collections::BTreeSet<String> =
         emit_spawn_seeding(&mut out, fixture_name, init_spawns);
+    let mut mask_alloc: Option<(String, u64)> = None; // (slot_expr, elem_bytes)
     for (name, ty) in &owned {
+        if crate::kernel_binding_ir::is_mask_bitmap_binding(name) {
+            if mask_alloc.is_none() {
+                let elem_bytes = elem_bytes_for_wgsl_ty(ty).unwrap_or(4);
+                let slot_expr = slot_count_expr(
+                    name,
+                    pair_keyed_second_key,
+                    item_entity_count,
+                    group_entity_count,
+                );
+                mask_alloc = Some((slot_expr, elem_bytes));
+            }
+            continue;
+        }
         let elem_bytes = match elem_bytes_for_wgsl_ty(ty) {
             Some(b) => b,
             None => {
@@ -3329,17 +3455,36 @@ fn synthesize_generated_runtime_struct(
              \x20       }});\n",
         ));
     }
-    // Allocate per-kernel cfg buffer (uniform, sized 64 bytes — covers
-    // the standard 4-u32 cfg layout with comfortable headroom for the
-    // few cfg shapes that grow). Per-tick writes happen inside step().
-    for kernel_name in &cfg_buffer_names {
+    if let Some((slot_expr, elem_bytes)) = mask_alloc {
         out.push_str(&format!(
-            "        let cfg_{kernel_name}_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
-             \x20           label: Some(\"{fixture_name}::cfg_{kernel_name}\"),\n\
-             \x20           size: 64u64,\n\
-             \x20           usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,\n\
+            "        // PERF (2026-09-03): every mask bitmap in ONE buffer; each mask's\n\
+             \x20       // binding is a `mask_bytes` slice at its id's 256-byte-aligned slot.\n\
+             \x20       let mask_bytes: u64 = ({slot_expr} * {elem_bytes}u64).max(16);\n\
+             \x20       let mask_slot_bytes: u64 = (mask_bytes + 255) / 256 * 256;\n\
+             \x20       let mask_bitmaps_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
+             \x20           label: Some(\"{fixture_name}::mask_bitmaps\"),\n\
+             \x20           size: mask_slot_bytes * {mask_slot_count}u64,\n\
+             \x20           usage: wgpu::BufferUsages::STORAGE\n\
+             \x20               | wgpu::BufferUsages::COPY_SRC\n\
+             \x20               | wgpu::BufferUsages::COPY_DST,\n\
              \x20           mapped_at_creation: false,\n\
              \x20       }});\n",
+        ));
+    }
+    // Allocate the consolidated cfg buffer: one 256-byte slot per kernel
+    // (see `CFG_OFF_*`), plus its host mirror. Per-tick writes land in
+    // the mirror inside step() and are uploaded with one write_buffer.
+    if !cfg_buffer_names.is_empty() {
+        out.push_str(&format!(
+            "        let cfg_all_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
+             \x20           label: Some(\"{fixture_name}::cfg_all\"),\n\
+             \x20           size: {size}u64,\n\
+             \x20           usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,\n\
+             \x20           mapped_at_creation: false,\n\
+             \x20       }});\n\
+             \x20       #[allow(unused_mut)]\n
+             \x20       let mut cfg_shadow: Vec<u8> = vec![0u8; {size}usize];\n",
+            size = cfg_buffer_names.len() * 256,
         ));
     }
     // Allocate the prev_event_tail snapshot side
@@ -3354,6 +3499,16 @@ fn synthesize_generated_runtime_struct(
              \x20           usage: wgpu::BufferUsages::STORAGE\n\
              \x20               | wgpu::BufferUsages::COPY_SRC\n\
              \x20               | wgpu::BufferUsages::COPY_DST,\n\
+             \x20           mapped_at_creation: false,\n\
+             \x20       }});\n",
+        ));
+    }
+    if has_indirect_consumers_outer {
+        out.push_str(&format!(
+            "        let pending_tail_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {{\n\
+             \x20           label: Some(\"{fixture_name}::pending_tail\"),\n\
+             \x20           size: 4u64,\n\
+             \x20           usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,\n\
              \x20           mapped_at_creation: false,\n\
              \x20       }});\n",
         ));
@@ -3380,14 +3535,14 @@ fn synthesize_generated_runtime_struct(
                 _ => continue,
             };
             out.push_str(&format!(
-                "        gpu.queue.write_buffer(\n\
-                 \x20           &cfg_{kernel}_buf,\n\
-                 \x20           {offset}u64,\n\
-                 \x20           &{bytes_expr},\n\
-                 \x20       );\n",
+                "        cfg_shadow[(CFG_OFF_{kernel} + {offset}) as usize..][..4]\n\
+                 \x20           .copy_from_slice(&{bytes_expr});\n",
                 kernel = spec.name,
             ));
         }
+    }
+    if !cfg_buffer_names.is_empty() {
+        out.push_str("        gpu.queue.write_buffer(&cfg_all_buf, 0, &cfg_shadow);\n");
     }
     if emits_timings {
         out.push_str(
@@ -3412,13 +3567,25 @@ fn synthesize_generated_runtime_struct(
     out.push_str("            registry_gpu,\n");
     out.push_str("            cache,\n");
     for (name, _) in &owned {
+        if crate::kernel_binding_ir::is_mask_bitmap_binding(name) {
+            continue;
+        }
         out.push_str(&format!("            {name}_buf,\n"));
     }
-    for kernel_name in &cfg_buffer_names {
-        out.push_str(&format!("            cfg_{kernel_name}_buf,\n"));
+    if mask_slot_count > 0 {
+        out.push_str("            mask_bitmaps_buf,\n");
+        out.push_str("            mask_slot_bytes,\n");
+        out.push_str("            mask_bytes,\n");
+    }
+    if !cfg_buffer_names.is_empty() {
+        out.push_str("            cfg_all_buf,\n");
+        out.push_str("            cfg_shadow,\n");
     }
     if has_fold_consumers_outer {
         out.push_str("            prev_event_tail_buf,\n");
+    }
+    if has_indirect_consumers_outer {
+        out.push_str("            pending_tail_buf,\n");
     }
     if binds_voxel_grid {
         out.push_str("            voxel_terrain,\n");
@@ -3430,10 +3597,6 @@ fn synthesize_generated_runtime_struct(
     }
     if needs_sort {
         out.push_str("            event_ring_sort_scratch_buf,\n");
-        out.push_str("            radix_histogram_buf,\n");
-        out.push_str("            radix_bucket_offsets_buf,\n");
-        out.push_str("            target_histogram_buf,\n");
-        out.push_str("            target_offsets_buf,\n");
         out.push_str("            sort_cfg_buf,\n");
         out.push_str("            sort_pipelines: None,\n");
     }
@@ -3449,257 +3612,67 @@ fn synthesize_generated_runtime_struct(
     out.push_str("        })\n");
     out.push_str("    }\n\n");
 
-    // Radix sort dispatch method — synthesized only for fixtures that need
-    // the sort pass. Lazily builds all 15 ComputePipelines on first call
-    // and caches them in self.sort_pipelines. Each subsequent tick just
-    // creates the per-tick bind groups and records dispatches.
+    // Event-ring sort dispatch method — synthesized only for fixtures that
+    // need the sort pass. Lazily builds the ONE ComputePipeline and its
+    // bind group on first call and caches both in self.sort_pipelines;
+    // every subsequent tick records a single 1-workgroup dispatch.
     if needs_sort {
-        let engine_stride: u64 = 11;
-        let ring_bytes = 1_048_576_u64 * engine_stride * 4;
-
-        // Build pipeline creation snippet for one kernel given:
-        //   name = "radix_stage_a_pass0_histogram"
-        //   entry = "radix_stage_a_pass0_histogram"
-        //   bgl_entries = "engine::gpu::bgl_storage(0, true), ..."
-        let make_pipeline = |kernel_name: &str, bgl_entries: &str| -> String {
-            format!(
-                "            {{\n\
-                 \x20               let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {{\n\
-                 \x20                   label: Some(\"{kernel_name}::wgsl\"),\n\
-                 \x20                   source: wgpu::ShaderSource::Wgsl({kernel_name}::SHADER_SRC.into()),\n\
-                 \x20               }});\n\
-                 \x20               let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {{\n\
-                 \x20                   label: Some(\"{kernel_name}::bgl\"),\n\
-                 \x20                   entries: &[{bgl_entries}],\n\
-                 \x20               }});\n\
-                 \x20               let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {{\n\
-                 \x20                   label: Some(\"{kernel_name}::pl\"),\n\
-                 \x20                   bind_group_layouts: &[&bgl],\n\
-                 \x20                   push_constant_ranges: &[],\n\
-                 \x20               }});\n\
-                 \x20               let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {{\n\
-                 \x20                   label: Some(\"{kernel_name}::pipeline\"),\n\
-                 \x20                   layout: Some(&pl),\n\
-                 \x20                   module: &shader,\n\
-                 \x20                   entry_point: Some(\"{kernel_name}\"),\n\
-                 \x20                   compilation_options: Default::default(),\n\
-                 \x20                   cache: None,\n\
-                 \x20               }});\n\
-                 \x20               (pipeline, bgl)\n\
-                 \x20           }}",
-            )
-        };
-
-        // Stage A histogram/scatter share 3 bindings:
-        //   0: event_ring_in (storage read)
-        //   1: event_tail (storage read)
-        //   2: radix_histogram (storage read_write)
-        // Stage A scan has 2 bindings:
-        //   0: radix_histogram (storage read_write)
-        //   1: radix_bucket_offsets (storage read_write)
-        // Stage A scatter has 5 bindings:
-        //   0: event_ring_in (storage read)
-        //   1: event_tail (storage read)
-        //   2: radix_histogram (storage read_write)
-        //   3: radix_bucket_offsets (storage read)
-        //   4: event_ring_out (storage read_write)
-        // Stage B count:
-        //   0: event_ring_in (storage read)
-        //   1: event_tail (storage read)
-        //   2: target_histogram (storage read_write)
-        //   3: cfg (uniform)
-        // Stage B scan:
-        //   0: target_histogram (storage read_write)
-        //   1: target_offsets (storage read_write)
-        //   2: cfg (uniform)
-        // Stage B scatter:
-        //   0: event_ring_in (storage read)
-        //   1: event_tail (storage read)
-        //   2: target_histogram (storage read_write)
-        //   3: target_offsets (storage read)
-        //   4: event_ring_out (storage read_write)
-        //   5: cfg (uniform)
-
-        let histogram_bgl = "engine::gpu::bgl_storage(0, true), engine::gpu::bgl_storage(1, true), engine::gpu::bgl_storage(2, false)";
-        let scan_bgl_a    = "engine::gpu::bgl_storage(0, false), engine::gpu::bgl_storage(1, false)";
-        let scatter_bgl_a = "engine::gpu::bgl_storage(0, true), engine::gpu::bgl_storage(1, true), engine::gpu::bgl_storage(2, false), engine::gpu::bgl_storage(3, true), engine::gpu::bgl_storage(4, false)";
-        let count_bgl_b   = "engine::gpu::bgl_storage(0, true), engine::gpu::bgl_storage(1, true), engine::gpu::bgl_storage(2, false), engine::gpu::bgl_uniform(3)";
-        let scan_bgl_b    = "engine::gpu::bgl_storage(0, false), engine::gpu::bgl_storage(1, false), engine::gpu::bgl_uniform(2)";
-        let scatter_bgl_b = "engine::gpu::bgl_storage(0, true), engine::gpu::bgl_storage(1, true), engine::gpu::bgl_storage(2, false), engine::gpu::bgl_storage(3, true), engine::gpu::bgl_storage(4, false), engine::gpu::bgl_uniform(5)";
-
+        let sort_name = crate::cg::emit::sort_kernel::SORT_KERNEL_NAME;
         let mut method = String::new();
-        method.push_str(
-            "    fn run_radix_sort(&mut self, encoder: &mut wgpu::CommandEncoder) {\n\
+        method.push_str(&format!(
+            "    fn run_radix_sort(&mut self, encoder: &mut wgpu::CommandEncoder) {{\n\
              \x20       let device = &self.gpu.device;\n\
-             \x20       // Lazily build + cache all 15 sort pipelines on first call.\n\
-             \x20       if self.sort_pipelines.is_none() {\n\
-             \x20           self.sort_pipelines = Some(SortPipelines {\n",
-        );
-        for pass in 0..4u32 {
-            let h_name = format!("radix_stage_a_pass{pass}_histogram");
-            let s_name = format!("radix_stage_a_pass{pass}_scan");
-            let sc_name = format!("radix_stage_a_pass{pass}_scatter");
-            method.push_str(&format!(
-                "                stage_a_pass{pass}_histogram: {h_body},\n\
-                 \x20               stage_a_pass{pass}_scan: {s_body},\n\
-                 \x20               stage_a_pass{pass}_scatter: {sc_body},\n",
-                h_body  = make_pipeline(&h_name,  histogram_bgl),
-                s_body  = make_pipeline(&s_name,  scan_bgl_a),
-                sc_body = make_pipeline(&sc_name, scatter_bgl_a),
-            ));
-        }
-        method.push_str(&format!(
-            "                stage_b_count:   {count_body},\n\
-             \x20               stage_b_scan:    {scan_body},\n\
-             \x20               stage_b_scatter: {scatter_body},\n",
-            count_body   = make_pipeline("radix_stage_b_count",   count_bgl_b),
-            scan_body    = make_pipeline("radix_stage_b_scan",    scan_bgl_b),
-            scatter_body = make_pipeline("radix_stage_b_scatter", scatter_bgl_b),
+             \x20       if self.sort_pipelines.is_none() {{\n\
+             \x20           let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {{\n\
+             \x20               label: Some(\"{sort_name}::wgsl\"),\n\
+             \x20               source: wgpu::ShaderSource::Wgsl({sort_name}::SHADER_SRC.into()),\n\
+             \x20           }});\n\
+             \x20           let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {{\n\
+             \x20               label: Some(\"{sort_name}::bgl\"),\n\
+             \x20               entries: &[\n\
+             \x20                   engine::gpu::bgl_storage(0, false),\n\
+             \x20                   engine::gpu::bgl_storage(1, true),\n\
+             \x20                   engine::gpu::bgl_storage(2, false),\n\
+             \x20                   engine::gpu::bgl_uniform(3),\n\
+             \x20               ],\n\
+             \x20           }});\n\
+             \x20           let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {{\n\
+             \x20               label: Some(\"{sort_name}::pl\"),\n\
+             \x20               bind_group_layouts: &[&bgl],\n\
+             \x20               push_constant_ranges: &[],\n\
+             \x20           }});\n\
+             \x20           let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {{\n\
+             \x20               label: Some(\"{sort_name}::pipeline\"),\n\
+             \x20               layout: Some(&pl),\n\
+             \x20               module: &shader,\n\
+             \x20               entry_point: Some(\"{sort_name}\"),\n\
+             \x20               compilation_options: Default::default(),\n\
+             \x20               cache: None,\n\
+             \x20           }});\n\
+             \x20           let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {{\n\
+             \x20               label: Some(\"{sort_name}::bg\"),\n\
+             \x20               layout: &bgl,\n\
+             \x20               entries: &[\n\
+             \x20                   wgpu::BindGroupEntry {{ binding: 0, resource: self.event_ring.ring().as_entire_binding() }},\n\
+             \x20                   wgpu::BindGroupEntry {{ binding: 1, resource: self.event_ring.tail().as_entire_binding() }},\n\
+             \x20                   wgpu::BindGroupEntry {{ binding: 2, resource: self.event_ring_sort_scratch_buf.as_entire_binding() }},\n\
+             \x20                   wgpu::BindGroupEntry {{ binding: 3, resource: self.sort_cfg_buf.as_entire_binding() }},\n\
+             \x20               ],\n\
+             \x20           }});\n\
+             \x20           self.sort_pipelines = Some(SortPipelines {{ pipeline, bind_group }});\n\
+             \x20       }}\n\
+             \x20       let p = self.sort_pipelines.as_ref().unwrap();\n\
+             \x20       // One 256-thread workgroup sorts the live records by\n\
+             \x20       // (clamped target, seq) in place; see cg::emit::sort_kernel.\n\
+             \x20       let mut pass_enc = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {{\n\
+             \x20           label: Some(\"sort::{sort_name}\"),\n\
+             \x20           timestamp_writes: None,\n\
+             \x20       }});\n\
+             \x20       pass_enc.set_pipeline(&p.pipeline);\n\
+             \x20       pass_enc.set_bind_group(0, &p.bind_group, &[]);\n\
+             \x20       pass_enc.dispatch_workgroups(1, 1, 1);\n\
+             \x20   }}\n\n",
         ));
-        method.push_str(
-            "            });\n\
-             \x20       }\n\
-             \x20       let p = self.sort_pipelines.as_ref().unwrap();\n\n\
-             \x20       // Stage A: 4 LSD radix passes on the seq field (32 bits, 8 bits/pass).\n\
-             \x20       // Ping-pong: even passes  read ring  → write scratch;\n\
-             \x20       //            odd  passes  read scratch → write ring.\n\
-             \x20       // After 4 passes (even count) data ends in event_ring (ring).\n",
-        );
-
-        // Stage A passes — ping-pong between ring and scratch.
-        // .as_entire_binding() takes &self so no & prefix needed;
-        // self.event_ring.ring() already returns &Buffer.
-        for pass in 0..4u32 {
-            let (in_buf, out_buf) = if pass % 2 == 0 {
-                ("self.event_ring.ring()", "self.event_ring_sort_scratch_buf")
-            } else {
-                ("self.event_ring_sort_scratch_buf", "self.event_ring.ring()")
-            };
-            let h_field = format!("stage_a_pass{pass}_histogram");
-            let s_field = format!("stage_a_pass{pass}_scan");
-            let sc_field = format!("stage_a_pass{pass}_scatter");
-
-            method.push_str(&format!(
-                "\n\
-                 \x20       // --- Stage A pass {pass} ---\n\
-                 \x20       // Histogram\n\
-                 \x20       {{\n\
-                 \x20           let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {{\n\
-                 \x20               label: Some(\"sort::a{pass}_histogram\"),\n\
-                 \x20               layout: &p.{h_field}.1,\n\
-                 \x20               entries: &[\n\
-                 \x20                   wgpu::BindGroupEntry {{ binding: 0, resource: {in_buf}.as_entire_binding() }},\n\
-                 \x20                   wgpu::BindGroupEntry {{ binding: 1, resource: self.event_ring.tail().as_entire_binding() }},\n\
-                 \x20                   wgpu::BindGroupEntry {{ binding: 2, resource: self.radix_histogram_buf.as_entire_binding() }},\n\
-                 \x20               ],\n\
-                 \x20           }});\n\
-                 \x20           let mut pass_enc = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {{ label: Some(\"sort::a{pass}_hist\"), timestamp_writes: None }});\n\
-                 \x20           pass_enc.set_pipeline(&p.{h_field}.0);\n\
-                 \x20           pass_enc.set_bind_group(0, &bg, &[]);\n\
-                 \x20           pass_enc.dispatch_workgroups((engine::gpu::EVENT_RING_CAP_SLOTS + 63) / 64, 1, 1);\n\
-                 \x20       }}\n\
-                 \x20       // Scan\n\
-                 \x20       {{\n\
-                 \x20           let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {{\n\
-                 \x20               label: Some(\"sort::a{pass}_scan\"),\n\
-                 \x20               layout: &p.{s_field}.1,\n\
-                 \x20               entries: &[\n\
-                 \x20                   wgpu::BindGroupEntry {{ binding: 0, resource: self.radix_histogram_buf.as_entire_binding() }},\n\
-                 \x20                   wgpu::BindGroupEntry {{ binding: 1, resource: self.radix_bucket_offsets_buf.as_entire_binding() }},\n\
-                 \x20               ],\n\
-                 \x20           }});\n\
-                 \x20           let mut pass_enc = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {{ label: Some(\"sort::a{pass}_scan\"), timestamp_writes: None }});\n\
-                 \x20           pass_enc.set_pipeline(&p.{s_field}.0);\n\
-                 \x20           pass_enc.set_bind_group(0, &bg, &[]);\n\
-                 \x20           pass_enc.dispatch_workgroups(1, 1, 1);\n\
-                 \x20       }}\n\
-                 \x20       // Scatter\n\
-                 \x20       {{\n\
-                 \x20           let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {{\n\
-                 \x20               label: Some(\"sort::a{pass}_scatter\"),\n\
-                 \x20               layout: &p.{sc_field}.1,\n\
-                 \x20               entries: &[\n\
-                 \x20                   wgpu::BindGroupEntry {{ binding: 0, resource: {in_buf}.as_entire_binding() }},\n\
-                 \x20                   wgpu::BindGroupEntry {{ binding: 1, resource: self.event_ring.tail().as_entire_binding() }},\n\
-                 \x20                   wgpu::BindGroupEntry {{ binding: 2, resource: self.radix_histogram_buf.as_entire_binding() }},\n\
-                 \x20                   wgpu::BindGroupEntry {{ binding: 3, resource: self.radix_bucket_offsets_buf.as_entire_binding() }},\n\
-                 \x20                   wgpu::BindGroupEntry {{ binding: 4, resource: {out_buf}.as_entire_binding() }},\n\
-                 \x20               ],\n\
-                 \x20           }});\n\
-                 \x20           let mut pass_enc = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {{ label: Some(\"sort::a{pass}_scatter\"), timestamp_writes: None }});\n\
-                 \x20           pass_enc.set_pipeline(&p.{sc_field}.0);\n\
-                 \x20           pass_enc.set_bind_group(0, &bg, &[]);\n\
-                 \x20           pass_enc.dispatch_workgroups(1, 1, 1);\n\
-                 \x20       }}\n",
-            ));
-        }
-
-        // Stage B: counting sort on target_id. After stage A (4 even passes),
-        // data is in event_ring. Stage B reads from ring, writes to scratch,
-        // then we copy scratch → ring so fold consumers always read from ring.
-        method.push_str(
-            "\n\
-             \x20       // --- Stage B: counting sort by target_id ---\n\
-             \x20       // Count\n\
-             \x20       {\n\
-             \x20           let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {\n\
-             \x20               label: Some(\"sort::b_count\"),\n\
-             \x20               layout: &p.stage_b_count.1,\n\
-             \x20               entries: &[\n\
-             \x20                   wgpu::BindGroupEntry { binding: 0, resource: self.event_ring.ring().as_entire_binding() },\n\
-             \x20                   wgpu::BindGroupEntry { binding: 1, resource: self.event_ring.tail().as_entire_binding() },\n\
-             \x20                   wgpu::BindGroupEntry { binding: 2, resource: self.target_histogram_buf.as_entire_binding() },\n\
-             \x20                   wgpu::BindGroupEntry { binding: 3, resource: self.sort_cfg_buf.as_entire_binding() },\n\
-             \x20               ],\n\
-             \x20           });\n\
-             \x20           let mut pass_enc = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some(\"sort::b_count\"), timestamp_writes: None });\n\
-             \x20           pass_enc.set_pipeline(&p.stage_b_count.0);\n\
-             \x20           pass_enc.set_bind_group(0, &bg, &[]);\n\
-             \x20           pass_enc.dispatch_workgroups((engine::gpu::EVENT_RING_CAP_SLOTS + 63) / 64, 1, 1);\n\
-             \x20       }\n\
-             \x20       // Scan\n\
-             \x20       {\n\
-             \x20           let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {\n\
-             \x20               label: Some(\"sort::b_scan\"),\n\
-             \x20               layout: &p.stage_b_scan.1,\n\
-             \x20               entries: &[\n\
-             \x20                   wgpu::BindGroupEntry { binding: 0, resource: self.target_histogram_buf.as_entire_binding() },\n\
-             \x20                   wgpu::BindGroupEntry { binding: 1, resource: self.target_offsets_buf.as_entire_binding() },\n\
-             \x20                   wgpu::BindGroupEntry { binding: 2, resource: self.sort_cfg_buf.as_entire_binding() },\n\
-             \x20               ],\n\
-             \x20           });\n\
-             \x20           let mut pass_enc = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some(\"sort::b_scan\"), timestamp_writes: None });\n\
-             \x20           pass_enc.set_pipeline(&p.stage_b_scan.0);\n\
-             \x20           pass_enc.set_bind_group(0, &bg, &[]);\n\
-             \x20           pass_enc.dispatch_workgroups(1, 1, 1);\n\
-             \x20       }\n\
-             \x20       // Scatter: ring → scratch\n\
-             \x20       {\n\
-             \x20           let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {\n\
-             \x20               label: Some(\"sort::b_scatter\"),\n\
-             \x20               layout: &p.stage_b_scatter.1,\n\
-             \x20               entries: &[\n\
-             \x20                   wgpu::BindGroupEntry { binding: 0, resource: self.event_ring.ring().as_entire_binding() },\n\
-             \x20                   wgpu::BindGroupEntry { binding: 1, resource: self.event_ring.tail().as_entire_binding() },\n\
-             \x20                   wgpu::BindGroupEntry { binding: 2, resource: self.target_histogram_buf.as_entire_binding() },\n\
-             \x20                   wgpu::BindGroupEntry { binding: 3, resource: self.target_offsets_buf.as_entire_binding() },\n\
-             \x20                   wgpu::BindGroupEntry { binding: 4, resource: self.event_ring_sort_scratch_buf.as_entire_binding() },\n\
-             \x20                   wgpu::BindGroupEntry { binding: 5, resource: self.sort_cfg_buf.as_entire_binding() },\n\
-             \x20               ],\n\
-             \x20           });\n\
-             \x20           let mut pass_enc = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some(\"sort::b_scatter\"), timestamp_writes: None });\n\
-             \x20           pass_enc.set_pipeline(&p.stage_b_scatter.0);\n\
-             \x20           pass_enc.set_bind_group(0, &bg, &[]);\n\
-             \x20           pass_enc.dispatch_workgroups(1, 1, 1);\n\
-             \x20       }\n\
-             \x20       // Copy sorted result (scratch) back to event_ring so fold consumers\n\
-             \x20       // always read from the canonical ring buffer.\n",
-        );
-        method.push_str(&format!(
-            "        encoder.copy_buffer_to_buffer(&self.event_ring_sort_scratch_buf, 0, self.event_ring.ring(), 0, {ring_bytes}u64);\n",
-        ));
-        method.push_str("    }\n\n");
-
         out.push_str(&method);
     }
 
@@ -3731,7 +3704,8 @@ fn synthesize_generated_runtime_struct(
         for (kernel, idx) in writes {
             let offset = 16 + idx * 4;
             out.push_str(&format!(
-                "        self.gpu.queue.write_buffer(&self.cfg_{kernel}_buf, {offset}u64, &bytes);\n",
+                "        self.cfg_shadow[(CFG_OFF_{kernel} + {offset}) as usize..][..4].copy_from_slice(&bytes);\n\
+                 \x20       self.gpu.queue.write_buffer(&self.cfg_all_buf, CFG_OFF_{kernel} + {offset}, &bytes);\n",
             ));
         }
         out.push_str("    }\n\n");
@@ -3861,7 +3835,7 @@ fn synthesize_generated_runtime_struct(
     );
     for kernel_name in &cfg_buffer_names {
         out.push_str(&format!(
-            "        self.gpu.queue.write_buffer(&self.cfg_{kernel_name}_buf, 0, cfg_bytes);\n",
+            "        self.cfg_shadow[CFG_OFF_{kernel_name} as usize..][..16].copy_from_slice(cfg_bytes);\n",
         ));
     }
 
@@ -3897,7 +3871,7 @@ fn synthesize_generated_runtime_struct(
             "        // ViewFold slot-2 override — sets cfg.second_key_pop = K for view `{view_name}`.\n\
              \x20       {{\n\
              \x20           let k_bytes: [u8; 4] = ({k_expr}).to_le_bytes();\n\
-             \x20           self.gpu.queue.write_buffer(&self.cfg_{kname}_buf, 8u64, &k_bytes);\n\
+             \x20           self.cfg_shadow[(CFG_OFF_{kname} + 8) as usize..][..4].copy_from_slice(&k_bytes);\n\
              \x20       }}\n",
             kname = spec.name,
         ));
@@ -3926,7 +3900,7 @@ fn synthesize_generated_runtime_struct(
                  \x20       // for `{kname}`.\n\
                  \x20       {{\n\
                  \x20           let ac_bytes: [u8; 4] = ({domain}).to_le_bytes();\n\
-                 \x20           self.gpu.queue.write_buffer(&self.cfg_{kname}_buf, 12u64, &ac_bytes);\n\
+                 \x20           self.cfg_shadow[(CFG_OFF_{kname} + 12) as usize..][..4].copy_from_slice(&ac_bytes);\n\
                  \x20       }}\n",
                 kname = spec.name,
             ));
@@ -3959,10 +3933,32 @@ fn synthesize_generated_runtime_struct(
             "        // ViewDecay slot-2 override — sets cfg.slot_count = {domain} for `{kname}`.\n\
              \x20       {{\n\
              \x20           let sc_bytes: [u8; 4] = ({domain}).to_le_bytes();\n\
-             \x20           self.gpu.queue.write_buffer(&self.cfg_{kname}_buf, 8u64, &sc_bytes);\n\
+             \x20           self.cfg_shadow[(CFG_OFF_{kname} + 8) as usize..][..4].copy_from_slice(&sc_bytes);\n\
              \x20       }}\n",
             kname = spec.name,
         ));
+        // Fused decay: every member's own slot count, at the cfg field
+        // `slot_count_<i>` (offset 16 + 4i, the kernel's runtime_cfg_fields).
+        let members = fused_decay_member_views(spec);
+        if members.len() >= 2 {
+            for (i, view) in members.iter().enumerate() {
+                let member_domain = view_domain_expr(view);
+                out.push_str(&format!(
+                    "        {{\n\
+                     \x20           let sc_bytes: [u8; 4] = ({member_domain}).to_le_bytes();\n\
+                     \x20           self.cfg_shadow[(CFG_OFF_{kname} + {off}) as usize..][..4].copy_from_slice(&sc_bytes);\n\
+                     \x20       }}\n",
+                    kname = spec.name,
+                    off = 16 + 4 * i,
+                ));
+            }
+        }
+    }
+    if !cfg_buffer_names.is_empty() {
+        out.push_str(
+            "        // One upload for every kernel's cfg block (see CFG_OFF_*).\n\
+             \x20       self.gpu.queue.write_buffer(&self.cfg_all_buf, 0, &self.cfg_shadow);\n",
+        );
     }
     // Indirect-consumer event-ring lifecycle — closes gaps 3 + 4
     // from commit 353527e6's Indirect-arm doc block, and folds in the
@@ -4065,84 +4061,17 @@ fn synthesize_generated_runtime_struct(
         .map(|s| s.as_str())
         .collect();
     let has_fold_consumers = has_fold_consumers_outer;
-    if has_fold_consumers {
-        // Stage 1: capture event_tail into prev_event_tail_buf via its
-        // own submit. This MUST land before the host enqueues the
-        // per-tick cfg_bytes write or (for indirect-consumer fixtures)
-        // the queue.write_buffer of pending_event_count, both of which
-        // would otherwise sequence before any subsequent encoder
-        // command and clobber what event_tail holds.
-        if needs_sort {
-            // When the fixture has both fold consumers and a sort pass,
-            // the sort runs in the snap_encoder so it sees the prior-tick
-            // GPU tail value. The main encoder resets the tail to
-            // pending_event_count (a queue.write_buffer that lands before
-            // main-encoder commands on submit), so running the sort in the
-            // main encoder would see tail=0 and sort nothing.
-            out.push_str(
-                "        // Capture prior-tick GPU event_tail and sort prior-tick\n\
-                 \x20       // events by (target, seq) — both in the snap encoder so\n\
-                 \x20       // sort kernels see the prior-tick tail before the main\n\
-                 \x20       // encoder's write_buffer resets it to pending_event_count.\n\
-                 \x20       {\n\
-                 \x20           let mut snap_encoder = self.gpu.device.create_command_encoder(\n\
-                 \x20               &wgpu::CommandEncoderDescriptor {\n\
-                 \x20                   label: Some(concat!(env!(\"CARGO_PKG_NAME\"), \"::fold_tail_snapshot\")),\n\
-                 \x20               },\n\
-                 \x20           );\n\
-                 \x20           snap_encoder.copy_buffer_to_buffer(\n\
-                 \x20               self.event_ring.tail(),\n\
-                 \x20               0,\n\
-                 \x20               &self.prev_event_tail_buf,\n\
-                 \x20               0,\n\
-                 \x20               4,\n\
-                 \x20           );\n\
-                 \x20           self.run_radix_sort(&mut snap_encoder);\n\
-                 \x20           self.gpu.queue.submit(Some(snap_encoder.finish()));\n\
-                 \x20       }\n",
-            );
-        } else {
-            out.push_str(
-                "        // Capture prior-tick GPU event_tail\n\
-                 \x20       // into prev_event_tail_buf via its own submit BEFORE the\n\
-                 \x20       // main step encoder enqueues anything that overwrites the\n\
-                 \x20       // GPU tail (clear_tail_in or pending_event_count write).\n\
-                 \x20       // The captured value drives each fold consumer's\n\
-                 \x20       // cfg.event_count for THIS tick (folds-at-T see T-1 emits).\n\
-                 \x20       {\n\
-                 \x20           let mut snap_encoder = self.gpu.device.create_command_encoder(\n\
-                 \x20               &wgpu::CommandEncoderDescriptor {\n\
-                 \x20                   label: Some(concat!(env!(\"CARGO_PKG_NAME\"), \"::fold_tail_snapshot\")),\n\
-                 \x20               },\n\
-                 \x20           );\n\
-                 \x20           snap_encoder.copy_buffer_to_buffer(\n\
-                 \x20               self.event_ring.tail(),\n\
-                 \x20               0,\n\
-                 \x20               &self.prev_event_tail_buf,\n\
-                 \x20               0,\n\
-                 \x20               4,\n\
-                 \x20           );\n\
-                 \x20           self.gpu.queue.submit(Some(snap_encoder.finish()));\n\
-                 \x20       }\n",
-            );
-        }
-    }
-    // Fallback: needs_sort but no fold consumers (unusual; normally
-    // needs_sort => has_fold_consumers). Submit sort in its own encoder
-    // before the main encoder to preserve prior-tick tail semantics.
-    if needs_sort && !has_fold_consumers {
-        out.push_str(
-            "        {\n\
-             \x20           let mut sort_encoder = self.gpu.device.create_command_encoder(\n\
-             \x20               &wgpu::CommandEncoderDescriptor {\n\
-             \x20                   label: Some(concat!(env!(\"CARGO_PKG_NAME\"), \"::sort\")),\n\
-             \x20               },\n\
-             \x20           );\n\
-             \x20           self.run_radix_sort(&mut sort_encoder);\n\
-             \x20           self.gpu.queue.submit(Some(sort_encoder.finish()));\n\
-             \x20       }\n",
-        );
-    }
+    // PERF (2026-09-03): ONE command encoder and ONE queue.submit per
+    // tick. The prior-tick tail snapshot and the event-ring sort used to
+    // run in their own encoder + submit so that they would sequence
+    // BEFORE the `queue.write_buffer` that resets the GPU tail to
+    // `pending_event_count` (queued writes land ahead of the next
+    // submit's command buffer). The reset is now an in-encoder copy from
+    // `pending_tail_buf` (itself filled by a queued write, which is fine:
+    // that buffer is touched by nothing else), recorded AFTER the
+    // snapshot + sort, so the ordering the two submits bought is kept
+    // inside one command buffer: snapshot → sort → tail reset → clears →
+    // schedule.
     out.push_str(
         "\n\
          \x20       let mut encoder = self.gpu.device.create_command_encoder(\n\
@@ -4151,6 +4080,27 @@ fn synthesize_generated_runtime_struct(
          \x20           },\n\
          \x20       );\n",
     );
+    if has_fold_consumers {
+        out.push_str(
+            "        // Capture the prior-tick GPU event_tail: it drives every fold\n\
+             \x20       // consumer's event count for THIS tick (folds-at-T see T-1\n\
+             \x20       // emits). Recorded before anything that overwrites the tail.\n\
+             \x20       encoder.copy_buffer_to_buffer(\n\
+             \x20           self.event_ring.tail(),\n\
+             \x20           0,\n\
+             \x20           &self.prev_event_tail_buf,\n\
+             \x20           0,\n\
+             \x20           4,\n\
+             \x20       );\n",
+        );
+    }
+    if needs_sort {
+        out.push_str(
+            "        // Sort the prior-tick events by (target, seq) while the tail\n\
+             \x20       // still holds the prior-tick count.\n\
+             \x20       self.run_radix_sort(&mut encoder);\n",
+        );
+    }
     // Mask bitmap clear (2026-05-12 squad_skirmish gap): the
     // fused-mask kernel sets bits via `atomicOr` with no clear step,
     // so bits latched at tick 0 stay set forever. The cooldown
@@ -4166,10 +4116,11 @@ fn synthesize_generated_runtime_struct(
         .cloned()
         .collect();
     mask_bitmap_buf_names.sort();
-    for buf_name in &mask_bitmap_buf_names {
-        out.push_str(&format!(
-            "        encoder.clear_buffer(&self.{buf_name}_buf, 0, None);\n",
-        ));
+    if !mask_bitmap_buf_names.is_empty() {
+        out.push_str(
+            "        // One clear for every mask bitmap (they share `mask_bitmaps_buf`).\n\
+             \x20       encoder.clear_buffer(&self.mask_bitmaps_buf, 0, None);\n",
+        );
     }
     // Stage 2: copy prev_event_tail_buf → each fold's cfg.event_count
     // slot inside the main encoder. queue.write_buffer of cfg_bytes
@@ -4177,13 +4128,18 @@ fn synthesize_generated_runtime_struct(
     // agent_count; this encoder copy runs after queue effects on
     // submit, so slot 0 ends up holding the snapshot value.
     for kname in &fold_consumer_kernel_names {
+        if prev_tail_fold_kernel_names.iter().any(|n| n == kname) {
+            // Reads `prev_event_tail_buf` through its own `event_tail`
+            // binding — no copy needed (see view_fold_prev_tail_kernel_names).
+            continue;
+        }
         out.push_str(&format!(
             "        // Fold cfg.event_count from prev-tick snapshot.\n\
              \x20       encoder.copy_buffer_to_buffer(\n\
              \x20           &self.prev_event_tail_buf,\n\
              \x20           0,\n\
-             \x20           &self.cfg_{kname}_buf,\n\
-             \x20           0,\n\
+             \x20           &self.cfg_all_buf,\n\
+             \x20           CFG_OFF_{kname},\n\
              \x20           4,\n\
              \x20       );\n",
         ));
@@ -4197,11 +4153,16 @@ fn synthesize_generated_runtime_struct(
         // next step() starts clean (the same guarantee
         // clear_tail_in's `tail_estimate = 0` line provided).
         out.push_str(
-            "        self.gpu.queue.write_buffer(\n\
-             \x20           self.event_ring.tail(),\n\
+            "        // Reset the GPU tail to the host-injected count. The value\n\
+             \x20       // goes through `pending_tail_buf` + an in-encoder copy so it\n\
+             \x20       // lands AFTER the snapshot + sort recorded above (a queued\n\
+             \x20       // write_buffer to the tail itself would land before them).\n\
+             \x20       self.gpu.queue.write_buffer(\n\
+             \x20           &self.pending_tail_buf,\n\
              \x20           0,\n\
              \x20           &pending_event_count.to_le_bytes(),\n\
              \x20       );\n\
+             \x20       encoder.copy_buffer_to_buffer(&self.pending_tail_buf, 0, self.event_ring.tail(), 0, 4);\n\
              \x20       self.event_ring.reset_tail_estimate();\n",
         );
     } else {
@@ -4398,11 +4359,18 @@ fn synthesize_generated_runtime_struct(
                 let value = if name == "event_ring" {
                     "self.event_ring.ring()".to_string()
                 } else if name == "event_tail" {
-                    "self.event_ring.tail()".to_string()
+                    if prev_tail_fold_kernel_names.iter().any(|n| n == &spec.name) {
+                        // The kernel reads its event count from this
+                        // binding (`event_tail[0u]`), so it must see the
+                        // prior-tick snapshot, not the live counter.
+                        "&self.prev_event_tail_buf".to_string()
+                    } else {
+                        "self.event_ring.tail()".to_string()
+                    }
                 } else if name == "sim_cfg" {
                     "self.event_ring.sim_cfg()".to_string()
                 } else if name == "cfg" {
-                    format!("&self.cfg_{}_buf", spec.name)
+                    format!("wgpu::BufferBinding {{ buffer: &self.cfg_all_buf, offset: CFG_OFF_{}, size: std::num::NonZeroU64::new(CFG_SLOT_BYTES) }}", spec.name)
                 } else if name == "voxel_grid" {
                     // ViewFold kernels don't bind voxel_grid; skip if seen.
                     continue;
@@ -4418,6 +4386,8 @@ fn synthesize_generated_runtime_struct(
                 } else if name.starts_with("ability_registry_") {
                     let col = name.strip_prefix("ability_registry_").unwrap();
                     format!("&self.registry_gpu.{col}")
+                } else if let Some(id) = crate::kernel_binding_ir::mask_bitmap_id(name) {
+                    format!("wgpu::BufferBinding {{ buffer: &self.mask_bitmaps_buf, offset: {id}u64 * self.mask_slot_bytes, size: std::num::NonZeroU64::new(self.mask_bytes) }}")
                 } else {
                     format!("&self.{buf_field_name}_buf")
                 };
@@ -4498,8 +4468,8 @@ fn synthesize_generated_runtime_struct(
                     "                    encoder.copy_buffer_to_buffer(\n\
                      \x20                       self.event_ring.tail(),\n\
                      \x20                       0,\n\
-                     \x20                       &self.cfg_{kname}_buf,\n\
-                     \x20                       0,\n\
+                     \x20                       &self.cfg_all_buf,\n\
+                     \x20                       CFG_OFF_{kname},\n\
                      \x20                       4,\n\
                      \x20                   );\n",
                     kname = spec.name,
@@ -4521,7 +4491,7 @@ fn synthesize_generated_runtime_struct(
             // (`agent_count * K` cells) — see the
             // `view_kernel_domain_expr` doc block for the dead-pair-fold
             // bug this closes. Every other kernel keeps `agent_count`.
-            let dispatch_count = view_kernel_domain_expr(spec);
+            let dispatch_count = view_kernel_dispatch_expr(spec);
             out.push_str(&format!(
                 "                {arm_pattern} => {{\n\
                  {cfg_copy_block}\
@@ -4585,9 +4555,11 @@ fn synthesize_generated_runtime_struct(
             //   else    → &self.<view-renamed name>_buf
             let buf_field_name = view_storage_per_view_name(name, view_name_for_kernel);
             let value_expr = if name == "cfg" {
-                format!("&self.cfg_{}_buf", spec.name)
+                format!("wgpu::BufferBinding {{ buffer: &self.cfg_all_buf, offset: CFG_OFF_{}, size: std::num::NonZeroU64::new(CFG_SLOT_BYTES) }}", spec.name)
             } else if name == "sim_cfg" {
                 "self.event_ring.sim_cfg()".to_string()
+            } else if let Some(id) = crate::kernel_binding_ir::mask_bitmap_id(name) {
+                format!("wgpu::BufferBinding {{ buffer: &self.mask_bitmaps_buf, offset: {id}u64 * self.mask_slot_bytes, size: std::num::NonZeroU64::new(self.mask_bytes) }}")
             } else {
                 format!("&self.{buf_field_name}_buf")
             };
@@ -4639,8 +4611,8 @@ fn synthesize_generated_runtime_struct(
                 "                    encoder.copy_buffer_to_buffer(\n\
                  \x20                       self.event_ring.tail(),\n\
                  \x20                       0,\n\
-                 \x20                       &self.cfg_{kname}_buf,\n\
-                 \x20                       0,\n\
+                 \x20                       &self.cfg_all_buf,\n\
+                 \x20                       CFG_OFF_{kname},\n\
                  \x20                       4,\n\
                  \x20                   );\n",
                 kname = spec.name,
@@ -4660,7 +4632,7 @@ fn synthesize_generated_runtime_struct(
         // path above: pair-keyed view kernels (ViewDecay lands here via
         // its Extras helper) span the full pair domain, everything else
         // dispatches over `agent_count`.
-        let dispatch_count = view_kernel_domain_expr(spec);
+        let dispatch_count = view_kernel_dispatch_expr(spec);
         out.push_str(&format!(
             "                {arm_pattern} => {{\n\
              {cfg_copy_block}\
@@ -5184,6 +5156,7 @@ mod tests {
             false,
             false, // binds_navgrid
             &[],
+            &[],
             0,
             0,
             false,
@@ -5277,6 +5250,7 @@ mod tests {
             false,
             false, // binds_navgrid
             &[],
+            &[],
             0,
             0,
             false,
@@ -5351,6 +5325,7 @@ mod tests {
             &[],
             false,
             false, // binds_navgrid
+            &[],
             &[],
             0,
             0,

@@ -1181,7 +1181,13 @@ fn compose_wgsl_file(
     // Sequential per-event kernels override to @workgroup_size(1): a
     // single thread walks the whole event ring, eliminating the CAS
     // race between threads competing on the same target agent.
-    let workgroup_attr = if sequential_per_event {
+    // PERF (2026-09-03): the spatial scatter is a OneShot dispatch (one
+    // workgroup) whose body cooperates across 256 threads; see
+    // `SPATIAL_BUILD_HASH_SCATTER_BODY`.
+    let is_wide_scatter = spec.name.ends_with("build_hash_scatter");
+    let workgroup_attr = if is_wide_scatter {
+        "@workgroup_size(256)".to_string()
+    } else if sequential_per_event {
         "@workgroup_size(1)".to_string()
     } else if workgroup.y > 1 {
         format!("@workgroup_size({}, {})", workgroup.x, workgroup.y)
@@ -1849,7 +1855,16 @@ fn compose_rust_module_file(spec: &KernelSpec, topology: &KernelTopology, sequen
     out.push_str(&format!(
         "pub struct {pascal}Kernel {{\n    \
          pipeline: wgpu::ComputePipeline,\n    \
-         bgl: wgpu::BindGroupLayout,\n}}\n\n",
+         bgl: wgpu::BindGroupLayout,\n    \
+         /// PERF (2026-09-03): the bind group, cached across ticks. `record()` used\n    \
+         /// to call `create_bind_group` every dispatch every tick — ~136 per tick\n    \
+         /// on a colony-sized fixture, a flat host cost that never shrank with\n    \
+         /// agent count. The bindings are the same buffer handles tick after\n    \
+         /// tick (uniforms are updated with `write_buffer`, never re-created),\n    \
+         /// so the group is rebuilt only when a buffer handle actually changes.\n    \
+         /// Presentation of the same descriptor to the same layout: identical\n    \
+         /// GPU work, so digests cannot move.\n    \
+         bg_cache: std::cell::RefCell<Option<(Vec<(wgpu::Buffer, u64, u64)>, wgpu::BindGroup)>>,\n}}\n\n",
         pascal = spec.pascal
     ));
 
@@ -2043,8 +2058,14 @@ fn render_from_context_expr(src: &BindingSource<'_>, name: &str) -> String {
         BindingSource::VoxelGrid => "ctx.voxel_grid.expect(\"kernel binds voxel_grid but the runtime didn't supply ctx.voxel_grid\")".to_string(),
         BindingSource::Navgrid => "ctx.navgrid.expect(\"kernel binds navgrid but the runtime didn't supply ctx.navgrid\")".to_string(),
         BindingSource::NavgridCfg => "ctx.navgrid_cfg.expect(\"kernel binds navgrid_cfg but the runtime didn't supply ctx.navgrid_cfg\")".to_string(),
-        BindingSource::Cfg => "extras.cfg".to_string(),
-        BindingSource::Extras => format!("extras.{name}"),
+        BindingSource::Cfg => "extras.cfg.clone()".to_string(),
+        BindingSource::Extras => {
+            if crate::kernel_binding_ir::is_mask_bitmap_binding(name) {
+                format!("extras.{name}.clone()")
+            } else {
+                format!("extras.{name}")
+            }
+        }
     }
 }
 
@@ -2087,11 +2108,20 @@ fn compose_bindings_from_context(spec: &KernelSpec) -> String {
 
     if needs_extras {
         writeln!(out, "pub struct {pascal}Extras<'a> {{").expect("write");
-        for (name, _) in classified
+        for (name, src) in classified
             .iter()
             .filter(|(_, src)| matches!(src, BindingSource::Cfg | BindingSource::Extras))
         {
-            writeln!(out, "    pub {name}: &'a wgpu::Buffer,").expect("write");
+            if matches!(src, BindingSource::Cfg)
+                || crate::kernel_binding_ir::is_mask_bitmap_binding(name)
+            {
+                // PERF (2026-09-03): every kernel's cfg block lives in ONE
+                // runtime-owned uniform buffer at a 256-byte stride, written
+                // once per tick; the binding is a slice of it.
+                writeln!(out, "    pub {name}: wgpu::BufferBinding<'a>,").expect("write");
+            } else {
+                writeln!(out, "    pub {name}: &'a wgpu::Buffer,").expect("write");
+            }
         }
         out.push_str("}\n\n");
     }
@@ -2185,7 +2215,7 @@ fn compose_kernel_trait_impl(spec: &KernelSpec, topology: &KernelTopology, seque
              compilation_options: Default::default(),\n            \
              cache: None,\n        \
              }});\n        \
-             Self {{ pipeline, bgl }}\n    }}\n\n",
+             Self {{ pipeline, bgl, bg_cache: std::cell::RefCell::new(None) }}\n    }}\n\n",
         name = spec.name,
         entry = spec.entry_point
     ));
@@ -2215,15 +2245,14 @@ fn compose_kernel_trait_impl(spec: &KernelSpec, topology: &KernelTopology, seque
             pascal = spec.pascal,
             cap_param = cap_param,
         ));
+        out.push_str("        let entries = [\n");
+        out.push_str(&lower_rust_bg_entries(spec));
+        out.push_str("        ];\n");
         out.push_str(&format!(
-            "        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {{\n            \
-                 label: Some(\"engine_gpu_rules::{name}::bg\"),\n            \
-                 layout: &self.bgl,\n            \
-                 entries: &[\n",
+            "        let mut bg_cache = self.bg_cache.borrow_mut();\n        \
+                 let bg = engine::gpu::cached_bind_group(&mut bg_cache, device, \"engine_gpu_rules::{name}::bg\", &self.bgl, &entries);\n",
             name = spec.name
         ));
-        out.push_str(&lower_rust_bg_entries(spec));
-        out.push_str("            ],\n        });\n");
         out.push_str(&format!(
             "        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {{\n            \
                  label: Some(\"engine_gpu_rules::{name}::pass\"),\n            \
@@ -2232,7 +2261,7 @@ fn compose_kernel_trait_impl(spec: &KernelSpec, topology: &KernelTopology, seque
             name = spec.name
         ));
         out.push_str("        pass.set_pipeline(&self.pipeline);\n");
-        out.push_str("        pass.set_bind_group(0, &bg, &[]);\n");
+        out.push_str("        pass.set_bind_group(0, bg, &[]);\n");
         // Sequential per-event kernels dispatch as OneShot (1,1,1): the
         // WGSL body's single thread walks the whole event ring.
         let dispatch_line = if sequential_per_event {
@@ -2402,6 +2431,9 @@ fn compose_view_fold_bindings_struct_fields(spec: &KernelSpec) -> String {
         if optional {
             writeln!(out, "    pub {}: Option<&'a wgpu::Buffer>,", b.name)
                 .expect("write to String never fails");
+        } else if b.name == "cfg" || crate::kernel_binding_ir::is_mask_bitmap_binding(&b.name) {
+            writeln!(out, "    pub {}: wgpu::BufferBinding<'a>,", b.name)
+                .expect("write to String never fails");
         } else {
             writeln!(out, "    pub {}: &'a wgpu::Buffer,", b.name)
                 .expect("write to String never fails");
@@ -2450,7 +2482,7 @@ fn compose_view_fold_bind_method(spec: &KernelSpec) -> String {
     let accessor = view_fold_accessor(spec).expect("ViewFold spec must carry an accessor");
     let mut out = String::new();
     out.push_str(&format!(
-        "    fn bind<'a>(&'a self, sources: &'a BindingSources<'a>, cfg: &'a wgpu::Buffer) -> {pascal}Bindings<'a> {{\n",
+        "    fn bind<'a>(&'a self, sources: &'a BindingSources<'a>, cfg: wgpu::BufferBinding<'a>) -> {pascal}Bindings<'a> {{\n",
         pascal = spec.pascal
     ));
     out.push_str(&format!(
@@ -2519,13 +2551,7 @@ fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
     out.push_str("        let primary_buf = bindings.view_storage_primary;\n");
     out.push_str("        let anchor_buf = bindings.view_storage_anchor.unwrap_or(primary_buf);\n");
     out.push_str("        let ids_buf = bindings.view_storage_ids.unwrap_or(primary_buf);\n");
-    out.push_str(&format!(
-        "        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {{\n            \
-             label: Some(\"engine_gpu_rules::{name}::bg\"),\n            \
-             layout: &self.bgl,\n            \
-             entries: &[\n",
-        name = spec.name
-    ));
+    out.push_str("        let entries = [\n");
     // BindGroupEntry list — each ViewFold slot in fixed order. The
     // primary/anchor/ids slots reference the locals computed above;
     // event_ring/tail/sim_cfg/cfg pull straight from `bindings`.
@@ -2548,7 +2574,7 @@ fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
         "                wgpu::BindGroupEntry { binding: 5, resource: bindings.sim_cfg.as_entire_binding() },\n",
     );
     out.push_str(
-        "                wgpu::BindGroupEntry { binding: 6, resource: bindings.cfg.as_entire_binding() },\n",
+        "                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::Buffer(bindings.cfg.clone()) },\n",
     );
     // G3d + Plan G G3f follow-up: emit a BindGroupEntry per spec
     // binding past the 7 standard ViewFold slots. The original
@@ -2560,13 +2586,22 @@ fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
     // stays in lock-step with `cg/emit/kernel.rs`'s post-scan that
     // appended them.
     for b in spec.bindings.iter().skip(7) {
+        let resource = if crate::kernel_binding_ir::is_mask_bitmap_binding(&b.name) {
+            format!("wgpu::BindingResource::Buffer(bindings.{}.clone())", b.name)
+        } else {
+            format!("bindings.{}.as_entire_binding()", b.name)
+        };
         out.push_str(&format!(
-            "                wgpu::BindGroupEntry {{ binding: {slot}, resource: bindings.{name}.as_entire_binding() }},\n",
+            "                wgpu::BindGroupEntry {{ binding: {slot}, resource: {resource} }},\n",
             slot = b.slot,
-            name = b.name,
         ));
     }
-    out.push_str("            ],\n        });\n");
+    out.push_str("        ];\n");
+    out.push_str(&format!(
+        "        let mut bg_cache = self.bg_cache.borrow_mut();\n        \
+             let bg = engine::gpu::cached_bind_group(&mut bg_cache, device, \"engine_gpu_rules::{name}::bg\", &self.bgl, &entries);\n",
+        name = spec.name
+    ));
     out.push_str(&format!(
         "        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {{\n            \
              label: Some(\"engine_gpu_rules::{name}::pass\"),\n            \
@@ -2575,7 +2610,7 @@ fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
         name = spec.name
     ));
     out.push_str("        pass.set_pipeline(&self.pipeline);\n");
-    out.push_str("        pass.set_bind_group(0, &bg, &[]);\n");
+    out.push_str("        pass.set_bind_group(0, bg, &[]);\n");
     out.push_str("        // Direct dispatch over `agent_cap` (the call-site parameter holds\n");
     out.push_str("        // event_count for fold kernels — see swarm_storm_runtime). One\n");
     out.push_str("        // thread per event_idx; the kernel's `if (event_idx >= cfg.event_count)\n");
@@ -3286,11 +3321,11 @@ mod tests {
             "missing Extras struct decl in:\n{emitted}"
         );
         assert!(
-            emitted.contains("pub mask_0_bitmap: &'a wgpu::Buffer,"),
+            emitted.contains("pub mask_0_bitmap: wgpu::BufferBinding<'a>,"),
             "Extras struct missing mask_0_bitmap field:\n{emitted}"
         );
         assert!(
-            emitted.contains("pub cfg: &'a wgpu::Buffer,"),
+            emitted.contains("pub cfg: wgpu::BufferBinding<'a>,"),
             "Extras struct missing cfg field:\n{emitted}"
         );
         assert!(
@@ -3302,11 +3337,11 @@ mod tests {
             "agent_hp should route through ctx.state.hp_buf:\n{emitted}"
         );
         assert!(
-            emitted.contains("mask_0_bitmap: extras.mask_0_bitmap,"),
+            emitted.contains("mask_0_bitmap: extras.mask_0_bitmap.clone(),"),
             "mask_0_bitmap should route through extras:\n{emitted}"
         );
         assert!(
-            emitted.contains("cfg: extras.cfg,"),
+            emitted.contains("cfg: extras.cfg.clone(),"),
             "cfg should route through extras:\n{emitted}"
         );
     }

@@ -2357,6 +2357,23 @@ fn lower_cg_stmt_body_to_wgsl(
                     // var declared in the surrounding scan loop.  No atomics
                     // needed — single writer per slot by construction.
                     if ctx.in_serial_fold_body.get() {
+                        // PERF (2026-09-03): pair-keyed views (`k1 * K + k2`
+                        // slots) fold ONE THREAD PER OBSERVER ROW instead of
+                        // one per slot — `agent_cap` threads instead of
+                        // `agent_cap * K`. The thread scans the ring once and
+                        // applies each matching event to the slot it names.
+                        // Every slot still receives exactly its own events, in
+                        // ring order, from a single thread, so the f32 sums
+                        // are bit-identical to the per-slot form (a load /
+                        // store round trip does not change an f32).
+                        if idx_expr.contains("cfg.second_key_pop") {
+                            return Ok(format!(
+                                "if (({idx_expr}) / cfg.second_key_pop == observer_slot) {{\n\
+                                 \x20   let _fold_row_slot = {idx_expr};\n\
+                                 \x20   atomicStore(&{storage}[_fold_row_slot], bitcast<u32>(bitcast<f32>(atomicLoad(&{storage}[_fold_row_slot])) + ({rhs})));\n\
+                                 }}"
+                            ));
+                        }
                         return Ok(format!(
                             "if ({idx_expr} == observer_slot) {{\n\
                              \x20   accum = accum + ({rhs});\n\

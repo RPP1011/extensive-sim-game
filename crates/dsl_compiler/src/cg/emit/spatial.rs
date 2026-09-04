@@ -108,6 +108,9 @@ pub fn compose_spatial_prelude(body: &str) -> String {
     let mut out = String::new();
     out.push_str(&format!(
         "// --- Spatial grid configuration (must match boids_runtime allocation) ---\n\
+         // Block scratch for the single-workgroup stable scatter (unused by\n\
+         // the other spatial kernels).\n\
+         var<workgroup> _scatter_blk_cell: array<u32, 256>;\n\
          const SPATIAL_CELL_SIZE: f32 = {cell_size:?};\n\
          const SPATIAL_WORLD_HALF_EXTENT: f32 = {extent:?};\n\
          const SPATIAL_GRID_DIM: u32 = {dim}u;\n\

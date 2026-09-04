@@ -127,6 +127,7 @@ fn synthesize(artifacts: &EmittedArtifacts) -> String {
         false,
         false, // binds_navgrid
         &[],
+        &[],
         0,
         0,
         false,

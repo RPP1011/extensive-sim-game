@@ -426,15 +426,30 @@ fn ecosystem_cascade_compiles() {
     );
     // Each @decay-annotated view should also yield a decay kernel
     // (per the verb/probe/metric plan + the earlier B2 close).
+    // PERF 2026-09-03: plain decays over distinct views fuse into one
+    // `decays_<first>_to_<last>` kernel; count members, not kernels.
     let decay_kernels: Vec<_> = art
         .kernel_index
         .iter()
-        .filter(|name| name.starts_with("decay_"))
+        .filter(|name| name.starts_with("decay_") || name.starts_with("decays_"))
         .collect();
+    let decay_members: usize = decay_kernels
+        .iter()
+        .map(|name| {
+            if name.starts_with("decays_") {
+                art.wgsl_files
+                    .get(&format!("{name}.wgsl"))
+                    .map(|src| src.matches("var<storage, read_write> view_storage_").count())
+                    .unwrap_or(0)
+            } else {
+                1
+            }
+        })
+        .sum();
     assert_eq!(
-        decay_kernels.len(),
+        decay_members,
         3,
-        "expected 3 decay kernels (one per @decay view); got: {:?}",
+        "expected 3 decays (one per @decay view) across {:?}",
         decay_kernels,
     );
     eprintln!(
@@ -502,8 +517,19 @@ fn foraging_colony_compiles() {
     // (NOT `cfg.agent_cap`) so the runtime can over-allocate to
     // `agent_cap × FOOD_COUNT` independently. Symmetrically the
     // fold body must compose the 2-D index via `cfg.second_key_pop`.
+    // The pheromone_trail decay may be a member of a fused `decays_*`
+    // kernel (PERF 2026-09-03); either form must bound on cfg.slot_count.
     let trail_decay = kernel_body_containing(&art, "decay_pheromone_trail")
-        .expect("expected decay_pheromone_trail kernel for pair_map view");
+        .or_else(|| {
+            art.wgsl_files
+                .iter()
+                .find(|(name, body)| {
+                    name.starts_with("decays_")
+                        && body.contains("view_storage_pheromone_trail_primary")
+                })
+                .map(|(_, body)| body.as_str())
+        })
+        .expect("expected a decay kernel covering pheromone_trail (pair_map view)");
     assert!(
         trail_decay.contains("cfg.slot_count"),
         "decay_pheromone_trail must early-return on cfg.slot_count \

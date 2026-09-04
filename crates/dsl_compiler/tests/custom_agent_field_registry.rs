@@ -207,6 +207,7 @@ fn synthesize_runtime_allocates_agent_buf_for_custom_field() {
         false,
         false, // binds_navgrid
         &[],
+        &[],
         0,
         0,
         false,

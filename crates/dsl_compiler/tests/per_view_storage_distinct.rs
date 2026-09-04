@@ -177,6 +177,7 @@ fn synthesize_two_view_fixture() -> String {
         false,
         false, // binds_navgrid
         &[],
+        &[],
         0,
         0,
         false,

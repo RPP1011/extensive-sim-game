@@ -480,6 +480,34 @@ pub fn kernel_topology_to_spec_and_body(
         return Ok((spec, wgsl_body));
     }
 
+    if let KernelKindClass::ViewDecayFused { members } = &class {
+        let wgsl_body = build_view_decay_fused_wgsl(members);
+        let bindings = build_view_decay_fused_bindings(members, &cfg_struct);
+        let cfg_struct_decl = build_view_decay_fused_cfg_struct_decl(&cfg_struct, members.len());
+        let cfg_build_expr = build_view_decay_fused_cfg_build_expr(&cfg_struct, members.len());
+        let runtime_cfg_fields: Vec<(String, String)> = (0..members.len())
+            .map(|i| (format!("slot_count_{i}"), "u32".to_string()))
+            .collect();
+        let spec = KernelSpec {
+            name,
+            pascal,
+            entry_point,
+            cfg_struct,
+            cfg_build_expr,
+            cfg_struct_decl,
+            bindings,
+            // Same kind as a singleton decay: same base cfg layout
+            // (`agent_cap, tick, slot_count, _pad0`), same wide 1-D
+            // dispatch over `slot_count`, same per-tick override path.
+            kind: KernelKind::ViewDecay,
+            runtime_cfg_fields,
+            y_dim_override: None,
+        };
+        spec.validate()
+            .map_err(|reason| KernelEmitError::InvalidKernelSpec { reason })?;
+        return Ok((spec, wgsl_body));
+    }
+
     // Plan I slice I.4b — BeliefSocialMerge dedicated path. The
     // generic handle aggregator doesn't emit `view_storage_primary`
     // for non-ViewFold kernels (it only handles ViewStorage writes
@@ -1281,6 +1309,15 @@ enum KernelKindClass {
         /// `ComputeOpKind::ViewDecay::packing`.
         packing: u8,
     },
+    /// PERF (2026-09-03): two or more PLAIN decays (no gate, no q8
+    /// packing) over distinct views, fused into one dispatch. Each
+    /// member sweeps its own storage binding
+    /// (`view_storage_<view>_primary`) up to its own slot count
+    /// (`cfg.slot_count_<i>`, written per tick by the runtime); the
+    /// dispatch covers the largest member. Bit-identical to the
+    /// singleton kernels: every slot is touched once, by the same
+    /// arithmetic, in a kernel that shares no state between members.
+    ViewDecayFused { members: Vec<ViewDecayMember> },
     /// Plan I slice I.4b — singleton kernel emitting a `merge from
     /// <agent>: <op>` clause's per-cell merge. Carries the view's
     /// snake_case name + the source event kind + the merge-op
@@ -1313,6 +1350,15 @@ enum KernelKindClass {
 /// Classify a kernel's body ops. See [`KernelKindClass`] for the
 /// table. `prog` carries the interner so the ViewFold path can
 /// resolve a snake_case view name eagerly.
+/// One member of a [`KernelKindClass::ViewDecayFused`] kernel.
+#[derive(Debug, Clone)]
+pub(crate) struct ViewDecayMember {
+    pub view_name: String,
+    pub rate_bits: u32,
+    pub mode: u8,
+    pub sub_by: u32,
+}
+
 fn classify_kernel(body_ops: &[&ComputeOp], prog: &CgProgram) -> KernelKindClass {
     if body_ops.is_empty() {
         return KernelKindClass::Generic;
@@ -1369,6 +1415,47 @@ fn classify_kernel(body_ops: &[&ComputeOp], prog: &CgProgram) -> KernelKindClass
     }
     // ViewFold detection: every body op must be a ViewFold and all
     // must reference the same view id.
+    // Fused plain decays — the fusion rule (`schedule::fusion`,
+    // ViewDecay/ViewDecay arm) only ever joins ungated, unpacked decays
+    // over distinct views, so an all-decay multi-op body is exactly that.
+    if body_ops.len() >= 2
+        && body_ops.iter().all(|op| {
+            matches!(
+                op.kind,
+                ComputeOpKind::ViewDecay {
+                    gate: None,
+                    packing: 0,
+                    ..
+                }
+            )
+        })
+    {
+        let members = body_ops
+            .iter()
+            .map(|op| {
+                let ComputeOpKind::ViewDecay {
+                    view,
+                    rate_bits,
+                    mode,
+                    sub_by,
+                    ..
+                } = &op.kind
+                else {
+                    unreachable!("all() above admits only ViewDecay ops")
+                };
+                ViewDecayMember {
+                    view_name: match prog.interner.get_view_name(*view) {
+                        Some(name) => name.to_string(),
+                        None => format!("view_{}", view.0),
+                    },
+                    rate_bits: *rate_bits,
+                    mode: *mode,
+                    sub_by: *sub_by,
+                }
+            })
+            .collect();
+        return KernelKindClass::ViewDecayFused { members };
+    }
     let mut first_view_id: Option<crate::cg::data_handle::ViewId> = None;
     for op in body_ops {
         match &op.kind {
@@ -2215,6 +2302,24 @@ pub fn semantic_kernel_name_for_topology(
 fn semantic_kernel_name(body_ops: &[&ComputeOp], prog: &CgProgram) -> String {
     debug_assert!(!body_ops.is_empty(), "semantic_kernel_name on empty ops");
 
+    // Fused decays: `decays_<first view>_to_<last view>` (the `decays_`
+    // prefix deliberately does NOT match the `decay_` prefix the runtime
+    // strips to recover a singleton decay's view name — a fused kernel
+    // carries its views in its binding accessors instead).
+    if body_ops.len() >= 2
+        && body_ops
+            .iter()
+            .all(|op| matches!(op.kind, ComputeOpKind::ViewDecay { .. }))
+    {
+        let first = single_op_kernel_name(&body_ops[0].kind, prog);
+        let last = single_op_kernel_name(&body_ops[body_ops.len() - 1].kind, prog);
+        return format!(
+            "decays_{}_to_{}",
+            first.trim_start_matches("decay_"),
+            last.trim_start_matches("decay_")
+        );
+    }
+
     // Special case: a fused-or-singleton run of ViewFold ops on the
     // same view collapses to `fold_<view>` (no event suffix). This
     // matches the legacy `emit_view_fold_kernel` topology where one
@@ -2936,27 +3041,12 @@ fn try_build_serial_scan_body(
         }
     }
 
-    let mut out = String::new();
-    // Wide 1-D index: the pair-keyed fold domain (`agent_count * K`)
-    // exceeds one 65535-workgroup x-row at agent_cap >= 2048, so the
-    // dispatch is chunked into full-width y rows. `gid.y` is 0 for every
-    // sub-4M domain, which keeps this byte-identical to the historical
-    // `gid.x` form. See `program::WIDE_DISPATCH_ROW_THREADS`.
-    out.push_str(&format!(
-        "    let observer_slot = gid.x{wide};\n",
-        wide = crate::cg::emit::program::wide_index_term(),
-    ));
-    out.push_str("    if (observer_slot >= cfg.agent_cap) { return; }\n");
-    out.push_str("    let tick = cfg.tick;\n");
-    out.push_str(
-        "    var accum: f32 = bitcast<f32>(atomicLoad(&view_storage_primary[observer_slot]));\n",
-    );
-    out.push_str("    let _ec = cfg.event_count;\n");
-    out.push_str("    for (var _ei = 0u; _ei < _ec; _ei = _ei + 1u) {\n");
-
+    // Lower every op's body first: the header depends on whether the
+    // view is pair-keyed (the body then carries the row-form marker).
+    let mut ops_out = String::new();
     for (i, op_id) in body_ops.iter().enumerate() {
         if i > 0 {
-            out.push_str("\n");
+            ops_out.push_str("\n");
         }
         let op = resolve_op(prog, *op_id)?;
         let (kind_tag, stride) = match &op.kind {
@@ -2970,9 +3060,9 @@ fn try_build_serial_scan_body(
             }
             _ => unreachable!("guarded above"),
         };
-        writeln!(out, "        // op#{} (view_fold)", op.id.0).expect("write to String");
-        out.push_str("        {\n");
-        out.push_str(&format!(
+        writeln!(ops_out, "        // op#{} (view_fold)", op.id.0).expect("write to String");
+        ops_out.push_str("        {\n");
+        ops_out.push_str(&format!(
             "            if (event_ring[_ei * {stride}u + 0u] == {kind_tag}u) {{\n"
         ));
 
@@ -2999,15 +3089,52 @@ fn try_build_serial_scan_body(
             })
             .collect::<Vec<_>>()
             .join("\n");
-        out.push_str(&indented);
-        out.push_str("\n            }"); // close if (tag == kind)
-        out.push_str("\n        }"); // close per-op brace
+        ops_out.push_str(&indented);
+        ops_out.push_str("\n            }"); // close if (tag == kind)
+        ops_out.push_str("\n        }"); // close per-op brace
     }
 
+
+    // PERF (2026-09-03): a pair-keyed view (`k1 * K + k2` slots) is
+    // folded one thread per observer ROW — `agent_cap` threads that each
+    // scan the ring once — instead of one thread per slot (`agent_cap *
+    // K` threads, the overwhelming majority of which scan an empty ring
+    // to confirm they own nothing). See the row form in
+    // `wgsl_body::lower_cg_stmt_to_wgsl`. The runtime reads the
+    // `// fold-rows` marker to size the dispatch by rows while keeping
+    // `cfg.agent_cap` at the full slot domain (bodies index other views
+    // with it).
+    let rows = ops_out.contains("_fold_row_slot");
+    let mut out = String::new();
+    if rows {
+        out.push_str("    // fold-rows: one thread per observer row of a pair-keyed view\n");
+    }
+    out.push_str(&format!(
+        "    let observer_slot = gid.x{wide};\n",
+        wide = crate::cg::emit::program::wide_index_term(),
+    ));
+    if rows {
+        out.push_str(
+            "    if (observer_slot >= cfg.agent_cap / cfg.second_key_pop) { return; }\n",
+        );
+    } else {
+        out.push_str("    if (observer_slot >= cfg.agent_cap) { return; }\n");
+    }
+    out.push_str("    let tick = cfg.tick;\n");
+    if !rows {
+        out.push_str(
+            "    var accum: f32 = bitcast<f32>(atomicLoad(&view_storage_primary[observer_slot]));\n",
+        );
+    }
+    out.push_str("    let _ec = cfg.event_count;\n");
+    out.push_str("    for (var _ei = 0u; _ei < _ec; _ei = _ei + 1u) {\n");
+    out.push_str(&ops_out);
     out.push_str("\n    }\n"); // close for loop
-    out.push_str(
-        "    atomicStore(&view_storage_primary[observer_slot], bitcast<u32>(accum));\n",
-    );
+    if !rows {
+        out.push_str(
+            "    atomicStore(&view_storage_primary[observer_slot], bitcast<u32>(accum));\n",
+        );
+    }
 
     Ok(Some(out))
 }
@@ -4055,6 +4182,96 @@ fn build_view_decay_cfg_build_expr(cfg_struct: &str) -> String {
 /// to its WGSL type / `BgSource`. Handles whose `handle_to_binding_metadata`
 /// returns `None` (Rng / ConfigConst — routed via cfg uniform / inline
 /// helpers) are skipped silently.
+/// WGSL body of a [`KernelKindClass::ViewDecayFused`] kernel: one wide
+/// 1-D thread index, then per member `if (k < cfg.slot_count_<i>) {
+/// <the singleton decay's read-modify-write on that member's storage> }`.
+/// The arithmetic per slot is character-for-character the singleton
+/// emitter's (`build_view_decay_wgsl_body_inner`, ungated branch).
+fn build_view_decay_fused_wgsl(members: &[ViewDecayMember]) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "    let k = gid.x{wide};\n",
+        wide = crate::cg::emit::program::wide_index_term(),
+    ));
+    out.push_str("    if (k >= cfg.slot_count) { return; }\n");
+    for (i, m) in members.iter().enumerate() {
+        let storage = format!("view_storage_{}_primary", m.view_name);
+        writeln!(out, "    // decay `{}`", m.view_name).expect("write to String never fails");
+        writeln!(out, "    if (k < cfg.slot_count_{i}) {{").expect("write to String never fails");
+        if m.mode == 1 {
+            writeln!(out, "        let old = atomicLoad(&{storage}[k]);")
+                .expect("write to String never fails");
+            writeln!(out, "        let by: u32 = {}u;", m.sub_by)
+                .expect("write to String never fails");
+            out.push_str("        let new_val: u32 = select(old - by, 0u, old < by);\n");
+            writeln!(out, "        atomicStore(&{storage}[k], new_val);")
+                .expect("write to String never fails");
+        } else {
+            let rate = f32::from_bits(m.rate_bits);
+            writeln!(out, "        let old = bitcast<f32>(atomicLoad(&{storage}[k]));")
+                .expect("write to String never fails");
+            writeln!(out, "        let new_val = old * {rate:?};")
+                .expect("write to String never fails");
+            writeln!(out, "        atomicStore(&{storage}[k], bitcast<u32>(new_val));")
+                .expect("write to String never fails");
+        }
+        out.push_str("    }\n");
+    }
+    out
+}
+
+/// Bindings of a fused decay kernel: one atomic storage slot per member
+/// (`view_storage_<view>_primary`, routed through the same
+/// `fold_view_<view>_handles` resident accessor a singleton decay uses),
+/// then the cfg uniform.
+fn build_view_decay_fused_bindings(
+    members: &[ViewDecayMember],
+    cfg_struct: &str,
+) -> Vec<KernelBinding> {
+    let mut bindings: Vec<KernelBinding> = members
+        .iter()
+        .enumerate()
+        .map(|(i, m)| KernelBinding {
+            slot: i as u32,
+            name: format!("view_storage_{}_primary", m.view_name),
+            access: AccessMode::AtomicStorage,
+            wgsl_ty: "u32".into(),
+            bg_source: BgSource::ViewHandle {
+                accessor: format!("fold_view_{}_handles", m.view_name),
+                tuple_idx: 0,
+            },
+        })
+        .collect();
+    bindings.push(KernelBinding {
+        slot: bindings.len() as u32,
+        name: "cfg".into(),
+        access: AccessMode::Uniform,
+        wgsl_ty: cfg_struct.to_string(),
+        bg_source: BgSource::Cfg,
+    });
+    bindings
+}
+
+fn build_view_decay_fused_cfg_struct_decl(cfg_struct: &str, members: usize) -> String {
+    let extra: String = (0..members)
+        .map(|i| format!(", pub slot_count_{i}: u32"))
+        .collect();
+    format!(
+        "#[repr(C)]\n\
+         #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]\n\
+         pub struct {cfg_struct} {{ pub agent_cap: u32, pub tick: u32, pub slot_count: u32, pub _pad: u32{extra} }}"
+    )
+}
+
+fn build_view_decay_fused_cfg_build_expr(cfg_struct: &str, members: usize) -> String {
+    let extra: String = (0..members)
+        .map(|i| format!(", slot_count_{i}: state.agent_cap()"))
+        .collect();
+    format!(
+        "{cfg_struct} {{ agent_cap: state.agent_cap(), tick: state.tick as u32, slot_count: state.agent_cap(), _pad: 0{extra} }}"
+    )
+}
+
 fn build_view_decay_bindings(
     view_name: &str,
     cfg_struct: &str,
@@ -4775,8 +4992,22 @@ fn build_wgsl_body(
     let prior_dispatch = ctx.dispatch.replace(Some(*dispatch));
 
     // Per-thread preamble — mirrors `ThreadIndexing` shape.
-    write!(out, "{}", thread_indexing_preamble(dispatch))
-        .expect("write to String never fails");
+    // PERF (2026-09-03): the spatial scatter is a OneShot dispatch whose
+    // body cooperates across one 256-thread workgroup (see
+    // `SPATIAL_BUILD_HASH_SCATTER_BODY`), so it must NOT get the
+    // single-thread `gid.x != 0` guard the other one-shots use.
+    let is_wide_scatter = body_ops.iter().any(|id| {
+        matches!(
+            prog.ops.get(id.0 as usize).map(|op| &op.kind),
+            Some(ComputeOpKind::SpatialQuery {
+                kind: SpatialQueryKind::BuildHashScatter
+            })
+        )
+    });
+    if !is_wide_scatter {
+        write!(out, "{}", thread_indexing_preamble(dispatch))
+            .expect("write to String never fails");
+    }
 
     // Tiled-MoveBoid preamble: when the kernel is dispatched
     // PerCell, every workgroup cooperates on a tile load before any
@@ -5176,11 +5407,38 @@ fn spatial_build_hash_scan_add_body() -> String {
 /// `spatial_grid_cells`. After this kernel `spatial_grid_cells` holds
 /// every agent id grouped by cell, with intra-cell order monotonic in
 /// agent_id — making downstream per_agent_u32 RNG inputs deterministic.
+// PERF (2026-09-03): the scatter used to be ONE thread walking every
+// agent slot (a serial `atomicAdd` per agent, so each agent's position
+// inside its cell was the number of lower-id agents in that cell). This
+// is the same placement computed by a single 256-thread workgroup in
+// blocks of 256 agents: a block writes its cells to workgroup memory,
+// each thread counts the EARLIER threads of the block with its cell
+// (its rank), and the per-cell running count (`spatial_grid_offsets`,
+// zeroed by the scan) is read before and bumped after every block.
+// Slot = starts[cell] + running[cell] + rank — exactly the serial
+// result, block by block. `n` and the block bound are uniform, so the
+// barriers sit in uniform control flow.
 const SPATIAL_BUILD_HASH_SCATTER_BODY: &str =
-    "for (var agent_id = 0u; agent_id < cfg.agent_cap; agent_id = agent_id + 1u) {\n\
-     \x20   let cell = pos_to_cell(agent_pos[agent_id]);\n\
-     \x20   let local_slot = atomicAdd(&spatial_grid_offsets[cell], 1u);\n\
-     \x20   spatial_grid_cells[spatial_grid_starts[cell] + local_slot] = agent_id;\n\
+    "let _t = gid.x;\n\
+     let _n = cfg.agent_cap;\n\
+     for (var _base = 0u; _base < _n; _base = _base + 256u) {\n\
+     \x20   let _a = _base + _t;\n\
+     \x20   let _valid = _a < _n;\n\
+     \x20   var _c = 0xFFFFFFFFu;\n\
+     \x20   if (_valid) { _c = pos_to_cell(agent_pos[_a]); }\n\
+     \x20   _scatter_blk_cell[_t] = _c;\n\
+     \x20   workgroupBarrier();\n\
+     \x20   if (_valid) {\n\
+     \x20       var _rank = 0u;\n\
+     \x20       for (var _u = 0u; _u < _t; _u = _u + 1u) {\n\
+     \x20           if (_scatter_blk_cell[_u] == _c) { _rank = _rank + 1u; }\n\
+     \x20       }\n\
+     \x20       let _local_slot = atomicLoad(&spatial_grid_offsets[_c]) + _rank;\n\
+     \x20       spatial_grid_cells[spatial_grid_starts[_c] + _local_slot] = _a;\n\
+     \x20   }\n\
+     \x20   workgroupBarrier();\n\
+     \x20   if (_valid) { atomicAdd(&spatial_grid_offsets[_c], 1u); }\n\
+     \x20   workgroupBarrier();\n\
      }";
 
 /// WGSL body template for [`SpatialQueryKind::FilteredWalk`].

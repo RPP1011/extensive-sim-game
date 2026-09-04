@@ -204,6 +204,22 @@ impl KernelSpec {
 }
 
 /// Pascal-case helper used by every spec builder.
+/// `mask_<id>_bitmap` — a mask predicate's bit set. PERF (2026-09-03):
+/// every mask bitmap of a fixture lives in ONE runtime buffer at a
+/// 256-byte-aligned stride, bound as a `wgpu::BufferBinding` slice, so
+/// the per-tick clear is a single `clear_buffer` instead of one per mask.
+pub fn is_mask_bitmap_binding(name: &str) -> bool {
+    name.starts_with("mask_") && name.ends_with("_bitmap")
+}
+
+/// The `<id>` of a `mask_<id>_bitmap` binding name.
+pub fn mask_bitmap_id(name: &str) -> Option<u32> {
+    name.strip_prefix("mask_")?
+        .strip_suffix("_bitmap")?
+        .parse::<u32>()
+        .ok()
+}
+
 pub fn snake_to_pascal(s: &str) -> String {
     let mut out = String::new();
     let mut up = true;
