@@ -370,6 +370,69 @@ pub struct FieldLayout {
 }
 
 // ---------------------------------------------------------------------------
+// Serial (deterministic contention) chronicle consumers — `@serial(...)`
+// ---------------------------------------------------------------------------
+
+/// How one ring word is mapped to an unsigned ordering key for a
+/// [`SerialConsumerSpec`] ordering column. The mapping makes plain
+/// `u32` comparison agree with the source type's natural order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SerialWordMap {
+    /// `u32` / `AgentId` / `Tick` / `bool` — compared as-is.
+    Unsigned,
+    /// `i32` — sign bit flipped (`x ^ 0x80000000`).
+    Signed,
+    /// `f32` — IEEE-754 total-order transform (negative values
+    /// bit-inverted, non-negative values sign-flipped).
+    Float,
+}
+
+/// One explicit ordering column of a `@serial` consumer — an absolute
+/// word offset within the event record plus its type mapping and
+/// direction.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SerialOrderWord {
+    /// Absolute word offset within the record (header + payload offset).
+    pub word: u32,
+    /// Type mapping applied before comparison.
+    pub map: SerialWordMap,
+    /// `true` → larger values are applied FIRST.
+    pub desc: bool,
+    /// Source-level name (binder or event field), for WGSL comments.
+    pub name: String,
+}
+
+/// Deterministic-contention contract for one `@serial(...)` chronicle
+/// consumer op (see `docs/spec/dsl.md` §"Deterministic contention").
+///
+/// All same-tick events the op consumes are partitioned into GROUPS
+/// by the key word (the entity every event in the group contends on).
+/// Each group is applied SERIALLY, by exactly one GPU thread, in a
+/// total order that depends only on event payloads:
+///
+/// 1. the explicit `order` columns (lexicographic, per-column
+///    direction),
+/// 2. then every payload word in declaration order (raw `u32`,
+///    ascending),
+/// 3. then the ring slot index — which can only decide between
+///    bit-identical payloads, whose application order cannot change
+///    the outcome.
+///
+/// Different groups still run in parallel with each other.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SerialConsumerSpec {
+    /// Absolute word offset (within the record) of the group key.
+    pub key_word: u32,
+    /// Source-level key name (binder or event field), for comments.
+    pub key_name: String,
+    /// Explicit ordering columns, most significant first.
+    pub order: Vec<SerialOrderWord>,
+    /// Absolute word offsets of every payload word, in declaration
+    /// order — the implicit tiebreak after `order`.
+    pub payload_words: Vec<u32>,
+}
+
+// ---------------------------------------------------------------------------
 // View signature — typed `(args, result)` schema per materialized view
 // ---------------------------------------------------------------------------
 
@@ -1177,9 +1240,22 @@ pub struct CgProgram {
     /// channel always emits the production shape).
     #[serde(skip)]
     pub debug_wgsl: super::lower::driver::DebugWgslFlags,
+    /// `@serial(...)` chronicle consumers, keyed by `OpId.0`. An op
+    /// present here is emitted as a deterministic grouped-serial
+    /// consumer (see [`SerialConsumerSpec`]) instead of the default
+    /// one-thread-per-event parallel apply. Side table (rather than a
+    /// field on [`super::op::ComputeOpKind::PhysicsRule`]) for the
+    /// same reason as [`Self::post_phase_physics_rules`]: programs
+    /// that don't use the annotation are bit-identical to before.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub serial_consumers: BTreeMap<u32, SerialConsumerSpec>,
 }
 
 impl CgProgram {
+    /// The `@serial(...)` contract for op `id`, when it has one.
+    pub fn serial_consumer(&self, id: OpId) -> Option<&SerialConsumerSpec> {
+        self.serial_consumers.get(&id.0)
+    }
     /// Construct an empty program. Equivalent to `CgProgram::default()`.
     pub fn new() -> Self {
         Self::default()
@@ -1421,6 +1497,11 @@ impl CgProgramBuilder {
     /// [`CgProgram::cascade_max_iter_for`].
     pub fn mark_cascade_max_iter(&mut self, id: PhysicsRuleId, max_iter: u32) {
         self.inner.cascade_max_iter.insert(id.0, max_iter);
+    }
+    /// Record that op `id` is a `@serial(...)` chronicle consumer.
+    /// See [`CgProgram::serial_consumers`].
+    pub fn mark_serial_consumer(&mut self, id: OpId, spec: SerialConsumerSpec) {
+        self.inner.serial_consumers.insert(id.0, spec);
     }
     pub fn intern_event_kind_name(
         &mut self,

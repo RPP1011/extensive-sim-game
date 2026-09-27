@@ -784,6 +784,20 @@ pub fn emit_cg_program_with_debug(
                 && body.contains("_f32_cas_did_transition_");
 
             let wgsl = compose_wgsl_file(&spec, &body, topology, prog, sequential_per_event);
+            // `@serial(...)` consumers must see EVERY event of the tick,
+            // but PerEvent kernels are dispatched with `agent_cap`
+            // threads (see `compose_dispatch_call`), so ring slots at or
+            // past `agent_cap` would never get a thread. Turn the serial
+            // kernel's one-event-per-thread preamble into a grid-stride
+            // loop over the whole live ring. Only serial kernels are
+            // rewritten; every other kernel's text is untouched.
+            let is_serial_kernel = matches!(topology, KernelTopology::Indirect { .. })
+                && topology.ops().iter().any(|o| prog.serial_consumer(*o).is_some());
+            let wgsl = if is_serial_kernel && !sequential_per_event {
+                serial_grid_stride_rewrite(&wgsl, &spec.entry_point)
+            } else {
+                wgsl
+            };
             wgsl_files.insert(format!("{}.wgsl", spec.name), wgsl);
 
             let rs = compose_rust_module_file(&spec, topology, sequential_per_event);
@@ -1256,6 +1270,58 @@ fn compose_wgsl_file(
     }
     out.push_str("}\n");
 
+    out
+}
+
+/// Rewrite a composed `@serial` consumer kernel so each thread walks the
+/// live ring with a grid stride instead of owning exactly one slot:
+///
+/// ```text
+/// fn cs_x(@builtin(global_invocation_id) gid: vec3<u32>,
+///         @builtin(num_workgroups) _sg_nwg: vec3<u32>) {
+/// for (var _sg_ev: u32 = gid.x; _sg_ev < min(cfg.event_count, CAP);
+///      _sg_ev = _sg_ev + _sg_nwg.x * 64u) {
+/// let event_idx = _sg_ev;
+/// ...original body...
+/// }
+/// }
+/// ```
+///
+/// Every live slot is visited by exactly one thread (so each group
+/// still elects exactly one leader), whatever the dispatch width.
+fn serial_grid_stride_rewrite(wgsl: &str, entry: &str) -> String {
+    const PREAMBLE: &str = "let event_idx = gid.x;\nif (event_idx >= cfg.event_count) { return; }\n";
+    let sig = format!("fn {entry}(@builtin(global_invocation_id) gid: vec3<u32>) {{\n");
+    // A composed PerEvent kernel always has this entry signature and
+    // preamble (`compose_wgsl_file` + `thread_indexing_preamble`). If
+    // either ever changes shape, fail the build loudly: silently keeping
+    // the one-slot-per-thread form would make the serial consumer drop
+    // every event at ring slot >= agent_cap.
+    let (Some(sig_at), Some(pre_at)) = (wgsl.find(&sig), wgsl.find(PREAMBLE)) else {
+        panic!(
+            "@serial kernel `{entry}`: unexpected PerEvent entry/preamble shape;              cannot apply the grid-stride rewrite"
+        );
+    };
+    assert!(
+        pre_at > sig_at && wgsl.trim_end().ends_with('}'),
+        "@serial kernel `{entry}`: unexpected PerEvent kernel layout"
+    );
+    let wg = crate::cg::dispatch::PER_EVENT_WORKGROUP_X;
+    let cap = crate::cg::emit::wgsl_body::default_event_ring_cap_slots();
+    let new_sig = format!(
+        "fn {entry}(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) _sg_nwg: vec3<u32>) {{\n"
+    );
+    let new_pre = format!(
+        "// @serial: grid-stride over the whole live ring (PerEvent kernels are\n\
+         // dispatched agent_cap wide; the ring can hold more events than that).\n\
+         for (var _sg_ev: u32 = gid.x; _sg_ev < min(cfg.event_count, {cap}u); _sg_ev = _sg_ev + _sg_nwg.x * {wg}u) {{\n\
+         let event_idx = _sg_ev;\n"
+    );
+    let mut out = wgsl.replacen(&sig, &new_sig, 1).replacen(PREAMBLE, &new_pre, 1);
+    // Close the loop just before the entry point's final `}`.
+    let trimmed_len = out.trim_end().len();
+    out.truncate(trimmed_len - 1);
+    out.push_str("}\n}\n");
     out
 }
 

@@ -162,6 +162,8 @@ fn main() {
                 | "play_probe"
                 // Subkind seeding (Plan A) — `init { spawn … }` runtime gate.
                 | "subkind_seeding_probe"
+                | "contention_claim_probe"
+                | "contention_stock_probe"
         ) {
             continue;
         }

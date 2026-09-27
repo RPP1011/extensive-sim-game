@@ -232,12 +232,187 @@ pub fn lower_physics(
     // fixture (assets/sim/boids.sim).
     let per_agent = is_per_agent_phase(&ir.annotations);
 
+    // `@serial(key = …, order = […], desc = […])` — deterministic
+    // contention resolution (see `CgProgram::serial_consumers`).
+    let serial_ann = ir.annotations.iter().find(|a| a.name == "serial");
+    if let Some(ann) = serial_ann {
+        if per_agent {
+            return Err(LoweringError::InvalidSerialAnnotation {
+                rule: rule_id,
+                detail: "`@serial` needs an event stream to serialise; it cannot be \
+                         combined with `@phase(per_agent)`"
+                    .to_string(),
+                span: ann.span,
+            });
+        }
+    }
+
     let mut op_ids = Vec::with_capacity(ir.handlers.len());
     for (handler, resolution) in ir.handlers.iter().zip(handler_resolutions.iter()) {
         let op_id = lower_one_handler(rule_id, replayable, handler, *resolution, per_agent, ctx)?;
+        if let Some(ann) = serial_ann {
+            let spec = resolve_serial_spec(rule_id, ann, handler, resolution.event_kind, ctx)?;
+            ctx.builder.mark_serial_consumer(op_id, spec);
+        }
         op_ids.push(op_id);
     }
     Ok(op_ids)
+}
+
+/// Resolve a `@serial(...)` annotation against one handler's event
+/// pattern + the event's ring layout.
+///
+/// Accepted forms (names may be pattern binders — `t` in
+/// `on ClaimReq { what: t }` — or event field names — `what`):
+///
+/// ```text
+/// @serial(t)                                   // group key only
+/// @serial(key = t)
+/// @serial(key = t, order = [p, w], desc = [p]) // p descending, then w ascending
+/// @serial(key = t, order = p)
+/// ```
+///
+/// The key must be a one-word field (`AgentId` / `u32` / `i32` /
+/// `bool` / `f32` / `Tick`); ordering columns likewise (a `vec3` has
+/// no natural order). Every name in `desc` must also appear in
+/// `order`.
+fn resolve_serial_spec(
+    rule_id: PhysicsRuleId,
+    ann: &dsl_ast::ast::Annotation,
+    handler: &PhysicsHandlerIR,
+    event_kind: crate::cg::op::EventKindId,
+    ctx: &LoweringCtx<'_>,
+) -> Result<crate::cg::program::SerialConsumerSpec, LoweringError> {
+    use crate::cg::expr::CgTy;
+    use crate::cg::program::{SerialConsumerSpec, SerialOrderWord, SerialWordMap};
+    use dsl_ast::ast::AnnotationValue;
+    use dsl_ast::ir::IrPattern;
+
+    let bad = |detail: String| LoweringError::InvalidSerialAnnotation {
+        rule: rule_id,
+        detail,
+        span: ann.span,
+    };
+    let layout = ctx
+        .event_layouts
+        .get(&event_kind)
+        .ok_or_else(|| bad(format!("event kind #{} has no ring layout", event_kind.0)))?;
+
+    // name (binder or field) -> event field name.
+    let field_for = |name: &str| -> Option<String> {
+        for b in handler.pattern.bindings() {
+            if let IrPattern::Bind { name: bn, .. } = &b.value {
+                if bn == name {
+                    return Some(b.field.clone());
+                }
+            }
+        }
+        if layout.fields.contains_key(name) {
+            return Some(name.to_string());
+        }
+        None
+    };
+    let one_word = |name: &str| -> Result<(u32, CgTy), LoweringError> {
+        let field = field_for(name).ok_or_else(|| {
+            bad(format!(
+                "`{name}` is neither a binder of this handler's event pattern nor a field of the event"
+            ))
+        })?;
+        let fl = layout
+            .fields
+            .get(&field)
+            .ok_or_else(|| bad(format!("event field `{field}` has no GPU ring layout")))?;
+        if fl.word_count != 1 || matches!(fl.ty, CgTy::Vec3F32 | CgTy::ViewKey { .. }) {
+            return Err(bad(format!(
+                "`{name}` has type `{}`; `@serial` keys and ordering columns must be one-word scalars",
+                fl.ty
+            )));
+        }
+        Ok((layout.header_word_count + fl.word_offset_in_payload, fl.ty))
+    };
+    let idents = |v: &AnnotationValue| -> Result<Vec<String>, LoweringError> {
+        match v {
+            AnnotationValue::Ident(s) => Ok(vec![s.clone()]),
+            AnnotationValue::List(items) => items
+                .iter()
+                .map(|i| match i {
+                    AnnotationValue::Ident(s) => Ok(s.clone()),
+                    other => Err(bad(format!("expected a name, got `{other:?}`"))),
+                })
+                .collect(),
+            other => Err(bad(format!(
+                "expected a name or a list of names, got `{other:?}`"
+            ))),
+        }
+    };
+
+    let mut key: Option<String> = None;
+    let mut order: Vec<String> = Vec::new();
+    let mut desc: Vec<String> = Vec::new();
+    for arg in &ann.args {
+        match arg.key.as_deref() {
+            None | Some("key") => {
+                if key.is_some() {
+                    return Err(bad("the group key is given twice".to_string()));
+                }
+                match &arg.value {
+                    AnnotationValue::Ident(s) => key = Some(s.clone()),
+                    other => {
+                        return Err(bad(format!(
+                            "the group key must be a name, got `{other:?}`"
+                        )))
+                    }
+                }
+            }
+            Some("order") => order = idents(&arg.value)?,
+            Some("desc") => desc = idents(&arg.value)?,
+            Some(other) => {
+                return Err(bad(format!(
+                    "unknown argument `{other}` (expected `key`, `order`, `desc`)"
+                )))
+            }
+        }
+    }
+    let key = key.ok_or_else(|| {
+        bad("missing group key — write `@serial(key = <binder>)`".to_string())
+    })?;
+    let (key_word, _key_ty) = one_word(&key)?;
+    for d in &desc {
+        if !order.contains(d) {
+            return Err(bad(format!("`{d}` is listed in `desc` but not in `order`")));
+        }
+    }
+    let mut order_words = Vec::with_capacity(order.len());
+    for name in &order {
+        let (word, ty) = one_word(name)?;
+        let map = match ty {
+            CgTy::I32 => SerialWordMap::Signed,
+            CgTy::F32 => SerialWordMap::Float,
+            _ => SerialWordMap::Unsigned,
+        };
+        order_words.push(SerialOrderWord {
+            word,
+            map,
+            desc: desc.contains(name),
+            name: name.clone(),
+        });
+    }
+    let mut payload_words: Vec<u32> = layout
+        .fields
+        .values()
+        .flat_map(|fl| {
+            let base = layout.header_word_count + fl.word_offset_in_payload;
+            base..base + fl.word_count.max(1)
+        })
+        .collect();
+    payload_words.sort_unstable();
+    payload_words.dedup();
+    Ok(SerialConsumerSpec {
+        key_word,
+        key_name: key,
+        order: order_words,
+        payload_words,
+    })
 }
 
 /// Is the `@phase(per_agent)` annotation present on a physics rule?

@@ -1,0 +1,95 @@
+// contention_stock_probe — ORDER-INDEPENDENT ACCUMULATION and the
+// GUARDED DECREMENT ("who gets the last unit") under heavy same-tick
+// contention, resolved deterministically by `@serial(...)`.
+//
+// Slot 0 is a food holder with `stock` units; every other slot is an
+// eater that, EVERY tick, emits one `Eat` event against the holder —
+// ~1000 same-tick events on ONE entity. `ApplyEat` is
+// `@serial(key = t, order = [h, w], desc = [h])`: the holder's events
+// are applied one at a time, hungriest first, ties by lowest eater id.
+//
+//   * guarded decrement: an eater takes one unit only while
+//     `stock >= 1` remains; once it runs out, the rest take the `else`
+//     branch (`missed`). Which eaters get the last units is decided by
+//     the (hunger desc, id asc) order, never by GPU scheduling.
+//   * accumulation: `ledger` sums a non-integral f32 `share` per event.
+//     f32 addition is not associative, so a parallel apply would be
+//     order-dependent even with atomics; the serial apply sums in the
+//     same deterministic order on every run (bit-identical).
+//
+// `ApplyEatUnordered` is the CONTROL — the same body without `@serial`
+// writing mirrored `_u` fields (lost updates, over-draft, scheduling-
+// dependent). The pin test compares the serial fields against a host
+// reference bit-for-bit; the control is only reported.
+
+// Per-kernel GPU timings (read only when SIM_KERNEL_TIMINGS=1 at run
+// time; instrumentation never changes what the sim computes).
+debug {
+  depth: kernel,
+}
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Eat { who: AgentId, what: AgentId, hunger: u32, share: f32 }
+
+entity Eater : Agent { }
+
+field idx:      u32   // == slot
+// holder side (slot 0)
+field stock:    u32
+field ledger:   f32
+field stock_u:  u32
+field ledger_u: f32
+// eater side
+field fed:      u32
+field missed:   u32
+field fed_u:    u32
+field missed_u: u32
+
+init {
+  alive: 1,
+  idx: slot,
+  stock: 2000,
+  stock_u: 2000,
+}
+
+verb EatFrom(self, target: Agent) =
+  action EatAction
+  when (self.idx >= 1u && target.idx == 0u)
+  emit Eat {
+    who: self,
+    what: target,
+    hunger: (self.idx * 11u + world.tick) % 17u,
+    share: 0.1 * f32(1u + (self.idx + world.tick) % 7u),
+  }
+  // The score must read `target` so scoring walks the candidates (a
+  // target-free score leaves best_target = NO_TARGET); slot 0 is the
+  // unique argmax.
+  score (10.0 - f32(target.idx))
+
+@phase(post) @serial(key = t, order = [h, w], desc = [h])
+physics ApplyEat {
+  on Eat { who: w, what: t, hunger: h, share: s } {
+    agents.set_ledger(t, agents.ledger(t) + s);
+    if (agents.stock(t) >= 1u) {
+      agents.set_stock(t, agents.stock(t) - 1u);
+      agents.set_fed(w, agents.fed(w) + 1u);
+    } else {
+      agents.set_missed(w, agents.missed(w) + 1u);
+    }
+  }
+}
+
+@phase(post)
+physics ApplyEatUnordered {
+  on Eat { who: w, what: t, hunger: h, share: s } {
+    agents.set_ledger_u(t, agents.ledger_u(t) + s);
+    if (agents.stock_u(t) >= 1u) {
+      agents.set_stock_u(t, agents.stock_u(t) - 1u);
+      agents.set_fed_u(w, agents.fed_u(w) + 1u);
+    } else {
+      agents.set_missed_u(w, agents.missed_u(w) + 1u);
+    }
+  }
+}

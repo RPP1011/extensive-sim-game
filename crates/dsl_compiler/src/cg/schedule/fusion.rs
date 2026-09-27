@@ -846,6 +846,15 @@ fn cross_domain_split_decision(
     prev: &ComputeOp,
     next: &ComputeOp,
 ) -> Option<JoinDecision> {
+    // `@serial(...)` consumers are singleton kernels: their body runs
+    // under a per-group leader election + ordered drain (see
+    // `emit::kernel::emit_serial_group_wrap`), and fusing a sibling op
+    // into the same dispatch would let that sibling race the group
+    // drain with no dispatch boundary in between. Programs without the
+    // annotation are unaffected (the side table is empty).
+    if prog.serial_consumer(prev.id).is_some() || prog.serial_consumer(next.id).is_some() {
+        return Some(JoinDecision::SplitShape);
+    }
     // Rule 4 (producer/consumer event-ring split) — fires before the
     // structural pair-match below so it covers (PhysicsRule, ViewFold)
     // and (PhysicsRule, PhysicsRule) cascades that the pair-match
