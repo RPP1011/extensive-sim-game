@@ -3182,8 +3182,9 @@ fn lower_cg_stmt_body_to_wgsl(
             binder: _,
             body,
             radius_cells,
+            radius,
             origin,
-        } => emit_for_each_neighbor_body(*body, *radius_cells, *origin, ctx),
+        } => emit_for_each_neighbor_body(*body, *radius_cells, *radius, *origin, ctx),
         CgStmt::ForEachAgentBody { binder: _, body } => {
             emit_for_each_agent_body(*body, ctx)
         }
@@ -3749,6 +3750,7 @@ fn build_apply_ability_per_target_body(
          \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
          \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
          \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
          \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
@@ -3813,6 +3815,7 @@ fn build_apply_ability_per_target_body(
          \x20               for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
          \x20                   for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
          \x20                       for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                           if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
          \x20                           let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
          \x20                           let _start = spatial_grid_starts[_cell];\n\
          \x20                           let _end = spatial_grid_starts[_cell + 1u];\n\
@@ -3874,6 +3877,7 @@ fn build_apply_ability_per_target_body(
          \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
          \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
          \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
          \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
@@ -3924,6 +3928,7 @@ fn build_apply_ability_per_target_body(
          \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
          \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
          \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
          \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
@@ -3983,6 +3988,7 @@ fn build_apply_ability_per_target_body(
          \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
          \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
          \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
          \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
@@ -4054,6 +4060,7 @@ fn build_apply_ability_per_target_body(
          \x20               for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
          \x20                   for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
          \x20                       for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                           if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
          \x20                           let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
          \x20                           let _start = spatial_grid_starts[_cell];\n\
          \x20                           let _end = spatial_grid_starts[_cell + 1u];\n\
@@ -4114,6 +4121,7 @@ fn build_apply_ability_per_target_body(
          \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
          \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
          \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
          \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
@@ -4179,6 +4187,7 @@ fn build_apply_ability_per_target_body(
          \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
          \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
          \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
          \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
@@ -4234,6 +4243,7 @@ fn build_apply_ability_per_target_body(
          \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
          \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
          \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
          \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
@@ -4282,6 +4292,7 @@ fn build_apply_ability_per_target_body(
          \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
          \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
          \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
          \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
@@ -4336,6 +4347,7 @@ fn build_apply_ability_per_target_body(
          \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
          \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
          \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
          \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
@@ -4432,6 +4444,7 @@ fn build_apply_ability_per_target_body(
          \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
          \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
          \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
+         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
          \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
@@ -6617,7 +6630,11 @@ pub fn lower_cg_stmt_list_to_wgsl(
     // `CgExpr::AgentSelfId` allocations from sibling fold calls) hash
     // to the same key and fuse correctly; an `AgentSelfId` vs. a
     // `ReadLocal` would hash differently and stay split.
-    let mut hoistable: std::collections::BTreeMap<(u32, String), Vec<&CgStmt>> =
+    // The key also carries the lowered declared-radius WGSL (empty for
+    // an un-annotated one-ring walk): folds over queries with different
+    // `@spatial(radius)` walk different cell boxes and gates, so they
+    // cannot share a walk.
+    let mut hoistable: std::collections::BTreeMap<(u32, String, String), Vec<&CgStmt>> =
         std::collections::BTreeMap::new();
     let mut residual: Vec<usize> = Vec::with_capacity(list.stmts.len());
     for (idx, stmt_id) in list.stmts.iter().enumerate() {
@@ -6629,6 +6646,7 @@ pub fn lower_cg_stmt_list_to_wgsl(
         )?;
         if let CgStmt::ForEachNeighbor {
             radius_cells,
+            radius,
             init,
             projection,
             origin,
@@ -6639,7 +6657,14 @@ pub fn lower_cg_stmt_list_to_wgsl(
                 && expr_is_pure_for_hoisting(*projection, ctx)
             {
                 let origin_wgsl = lower_cg_expr_to_wgsl(*origin, ctx)?;
-                hoistable.entry((*radius_cells, origin_wgsl)).or_default().push(stmt_node);
+                let radius_wgsl = match radius {
+                    Some(r) => lower_cg_expr_to_wgsl(*r, ctx)?,
+                    None => String::new(),
+                };
+                hoistable
+                    .entry((*radius_cells, radius_wgsl, origin_wgsl))
+                    .or_default()
+                    .push(stmt_node);
                 continue;
             }
         }
@@ -7160,6 +7185,12 @@ fn emit_fused_for_each_neighbor(
         CgStmt::ForEachNeighbor { origin, .. } => *origin,
         _ => unreachable!("caller restricts to ForEachNeighbor"),
     };
+    // Declared `@spatial(radius = R)`, if any. The hoister partitions by
+    // the lowered radius WGSL too, so every fold in the group shares it.
+    let declared_radius = match folds[0] {
+        CgStmt::ForEachNeighbor { radius, .. } => *radius,
+        _ => unreachable!("caller restricts to ForEachNeighbor"),
+    };
 
     // Are we emitting inside a tiled-MoveBoid kernel
     // (DispatchShape::PerCell)? If so, the surrounding kernel
@@ -7203,7 +7234,10 @@ fn emit_fused_for_each_neighbor(
         head.push_str(&format!("var local_{n}: {ty_wgsl} = {init_wgsl};\n"));
     }
 
-    if is_tiled {
+    // A declared-radius walk never uses the 27-cell tile (the tile only
+    // covers one ring); `is_tile_eligible_body` keeps such folds out of
+    // PerCell kernels, and this guard keeps the emit correct regardless.
+    if is_tiled && declared_radius.is_none() {
         // Tile-walk: lanes process one home agent each (already
         // bound to `agent_id` by the per-cell preamble). The fold
         // walks the 27 neighbor slots loaded into `tile_*` by the
@@ -7223,10 +7257,25 @@ fn emit_fused_for_each_neighbor(
         for (n, _, _, projection_id) in &prepared {
             let proj_wgsl = lower_cg_expr_to_wgsl(*projection_id, ctx)?;
             updates.push_str(&format!(
-                "            local_{n} = (local_{n} + ({proj_wgsl}));\n"
+                "                local_{n} = (local_{n} + ({proj_wgsl}));\n"
             ));
         }
         ctx.tile_walk_index.replace(prior_idx);
+        // Spill path: candidates past the tile (a neighbour cell holding
+        // more than SPATIAL_MAX_PER_CELL agents) read their fields from
+        // global memory. Rendering the projections with the tile
+        // substitution disengaged routes candidate pos/vel reads through
+        // the normal agent-field emit, including its hazard-shadow
+        // redirect (`agent_pos_prev` / `agent_vel_prev`) — the same
+        // source the tile load uses, so a spilled candidate contributes
+        // exactly what it would have from the tile.
+        let mut spill_updates = String::new();
+        for (n, _, _, projection_id) in &prepared {
+            let proj_wgsl = lower_cg_expr_to_wgsl(*projection_id, ctx)?;
+            spill_updates.push_str(&format!(
+                "                local_{n} = (local_{n} + ({proj_wgsl}));\n"
+            ));
+        }
 
         // Iterate over the 27 cells in the tile. We still need
         // `per_pair_candidate` for the projection's `!= self` check
@@ -7238,7 +7287,9 @@ fn emit_fused_for_each_neighbor(
         let body = format!(
             "{head}{{\n\
              \x20   for (var nbr_lane: u32 = 0u; nbr_lane < 27u; nbr_lane = nbr_lane + 1u) {{\n\
+             \x20       // Full cell count (0 for an out-of-grid neighbour).\n\
              \x20       let _nbr_count = tile_count[nbr_lane];\n\
+             \x20       if (_nbr_count == 0u) {{ continue; }}\n\
              \x20       let _dz = i32(nbr_lane / 9u) - 1;\n\
              \x20       let _dy = i32((nbr_lane / 3u) % 3u) - 1;\n\
              \x20       let _dx = i32(nbr_lane % 3u) - 1;\n\
@@ -7250,13 +7301,18 @@ fn emit_fused_for_each_neighbor(
              \x20       let _nbr_start = spatial_grid_starts[_nbr_cell];\n\
              \x20       for (var _i: u32 = 0u; _i < _nbr_count; _i = _i + 1u) {{\n\
              \x20           let per_pair_candidate = spatial_grid_cells[_nbr_start + _i];\n\
-             \x20           let _tile_idx = nbr_lane * SPATIAL_MAX_PER_CELL + _i;\n\
+             \x20           if (_i < SPATIAL_MAX_PER_CELL) {{\n\
+             \x20               let _tile_idx = nbr_lane * SPATIAL_MAX_PER_CELL + _i;\n\
              {updates}\
+             \x20           }} else {{\n\
+             {spill_updates}\
+             \x20           }}\n\
              \x20       }}\n\
              \x20   }}\n\
              }}",
             head = head,
             updates = updates,
+            spill_updates = spill_updates,
         );
         Ok(body)
     } else {
@@ -7268,6 +7324,14 @@ fn emit_fused_for_each_neighbor(
             let proj_wgsl = lower_cg_expr_to_wgsl(*projection_id, ctx)?;
             updates.push_str(&format!(
                 "                    local_{n} = (local_{n} + ({proj_wgsl}));\n"
+            ));
+        }
+        if let Some(radius_id) = declared_radius {
+            let origin_wgsl = lower_cg_expr_to_wgsl(origin, ctx)?;
+            let radius_wgsl = lower_cg_expr_to_wgsl(radius_id, ctx)?;
+            return Ok(format!(
+                "{head}{}",
+                emit_declared_radius_walk(&origin_wgsl, &radius_wgsl, &updates)
             ));
         }
         // Auto-injected distance gate (Gap dungeon_layout#1) — same
@@ -7297,6 +7361,7 @@ fn emit_fused_for_each_neighbor(
              \x20   for (var dz: i32 = -{r}; dz <= {r}; dz = dz + 1) {{\n\
              \x20       for (var dy: i32 = -{r}; dy <= {r}; dy = dy + 1) {{\n\
              \x20           for (var dx: i32 = -{r}; dx <= {r}; dx = dx + 1) {{\n\
+             \x20               if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) {{ continue; }}\n\
              \x20               let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
              \x20               let _start = spatial_grid_starts[_cell];\n\
              \x20               let _end = spatial_grid_starts[_cell + 1u];\n\
@@ -7319,6 +7384,70 @@ fn emit_fused_for_each_neighbor(
         );
         Ok(body)
     }
+}
+
+/// The declared-radius spatial walk shared by the fold form
+/// ([`emit_fused_for_each_neighbor`]) and the body form
+/// ([`emit_for_each_neighbor_body`]) of a query carrying
+/// `@spatial(radius = R)`.
+///
+/// Honours `R` exactly, whatever its size relative to
+/// `SPATIAL_CELL_SIZE`:
+///
+/// - The cell box is `pos_to_cell_xyz(origin - R') ..= pos_to_cell_xyz(origin + R')`
+///   per axis (`R' = R + 1e-3`, padding against f32 rounding),
+///   computed per thread — so a radius spanning several cells walks all
+///   of them, and a sub-cell radius walks at most 2 per
+///   axis instead of the fixed 3. The loop bounds are runtime values,
+///   which also covers a `@runtime` config radius.
+/// - `pos_to_cell_xyz` clamps exactly like the binning `pos_to_cell`,
+///   so the box never leaves the grid and every cell is visited at
+///   most once (no duplicate candidates at the world edge). A position
+///   beyond the world extent maps to the edge cell its agents were
+///   binned into, so those agents are still reached.
+/// - Each candidate is gated on `|candidate - origin|² <= R²` (closed
+///   ball), which also rejects the far-away agents pooled into an
+///   edge cell.
+///
+/// Iteration order is fixed (z, then y, then x cells ascending; slots in
+/// ascending agent id within a cell), so fold accumulations are
+/// deterministic run to run.
+///
+/// `inner` is the per-candidate WGSL (accumulator updates or the body
+/// statements), already indented; `per_pair_candidate` is bound for it.
+fn emit_declared_radius_walk(origin_wgsl: &str, radius_wgsl: &str, inner: &str) -> String {
+    format!(
+        "{{\n\
+         \x20   let _gate_origin_id: u32 = {origin_wgsl};\n\
+         \x20   let _gate_origin_pos: vec3<f32> = agent_pos[_gate_origin_id];\n\
+         \x20   // Declared @spatial(radius): walk every cell the box\n\
+         \x20   // origin +/- R overlaps, keep candidates with |d|^2 <= R^2.\n\
+         \x20   let _q_radius: f32 = f32({radius_wgsl});\n\
+         \x20   let _gate_radius_sq = _q_radius * _q_radius;\n\
+         \x20   // The box is padded by 1e-3 so f32 rounding in `origin +/- R`\n\
+         \x20   // can never drop a cell holding an in-radius candidate; the\n\
+         \x20   // exact R^2 gate below does the filtering.\n\
+         \x20   let _q_reach = vec3<f32>(_q_radius + 1.0e-3);\n\
+         \x20   let _q_lo = pos_to_cell_xyz(_gate_origin_pos - _q_reach);\n\
+         \x20   let _q_hi = pos_to_cell_xyz(_gate_origin_pos + _q_reach);\n\
+         \x20   for (var _qz: i32 = _q_lo.z; _qz <= _q_hi.z; _qz = _qz + 1) {{\n\
+         \x20       for (var _qy: i32 = _q_lo.y; _qy <= _q_hi.y; _qy = _qy + 1) {{\n\
+         \x20           for (var _qx: i32 = _q_lo.x; _qx <= _q_hi.x; _qx = _qx + 1) {{\n\
+         \x20               let _cell = cell_index(_qx, _qy, _qz);\n\
+         \x20               let _start = spatial_grid_starts[_cell];\n\
+         \x20               let _end = spatial_grid_starts[_cell + 1u];\n\
+         \x20               for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {{\n\
+         \x20                   let per_pair_candidate = spatial_grid_cells[_i];\n\
+         \x20                   let _gate_dxyz = agent_pos[per_pair_candidate] - _gate_origin_pos;\n\
+         \x20                   let _gate_dist_sq = dot(_gate_dxyz, _gate_dxyz);\n\
+         \x20                   if (_gate_dist_sq > _gate_radius_sq) {{ continue; }}\n\
+         {inner}\
+         \x20               }}\n\
+         \x20           }}\n\
+         \x20       }}\n\
+         \x20   }}\n\
+         }}"
+    )
 }
 
 /// Emit a per-slot body block for [`CgStmt::ForEachAgentBody`] —
@@ -7391,6 +7520,7 @@ fn emit_for_each_agent_body(
 fn emit_for_each_neighbor_body(
     body_list: crate::cg::stmt::CgStmtListId,
     radius_cells: u32,
+    declared_radius: Option<CgExprId>,
     origin: CgExprId,
     ctx: &EmitCtx,
 ) -> Result<String, EmitError> {
@@ -7412,6 +7542,11 @@ fn emit_for_each_neighbor_body(
     // 4-deep loop chain (3 cell-axis loops + 1 candidate loop). Six
     // levels of 4-space indent → 24 spaces.
     let indented_body = indent_block(&body_wgsl, 6);
+    if let Some(radius_id) = declared_radius {
+        let radius_wgsl = lower_cg_expr_to_wgsl(radius_id, ctx)?;
+        let inner = format!("{indented_body}\n");
+        return Ok(emit_declared_radius_walk(&origin_wgsl, &radius_wgsl, &inner));
+    }
     // Auto-injected distance gate (Gap dungeon_layout#1). The spatial
     // grid's `cell_index` helper clamps OOB axis coordinates to
     // `GRID_DIM - 1`, which silently pools every distant agent into
@@ -7450,6 +7585,7 @@ fn emit_for_each_neighbor_body(
          \x20   for (var dz: i32 = -{r}; dz <= {r}; dz = dz + 1) {{\n\
          \x20       for (var dy: i32 = -{r}; dy <= {r}; dy = dy + 1) {{\n\
          \x20           for (var dx: i32 = -{r}; dx <= {r}; dx = dx + 1) {{\n\
+         \x20               if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) {{ continue; }}\n\
          \x20               let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
          \x20               let _start = spatial_grid_starts[_cell];\n\
          \x20               let _end = spatial_grid_starts[_cell + 1u];\n\
@@ -9295,6 +9431,7 @@ mod tests {
                 binder: LocalId(7),
                 body: inner_list,
                 radius_cells: 1,
+                radius: None,
                 origin,
             },
         );

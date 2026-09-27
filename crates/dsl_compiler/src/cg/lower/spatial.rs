@@ -101,7 +101,10 @@
 use dsl_ast::ast::Span;
 use dsl_ast::ir::{IrCallArg, IrExpr, IrExprNode, NamespaceId};
 
+use crate::cg::data_handle::DataHandle;
 use crate::cg::dispatch::DispatchShape;
+use crate::cg::data_handle::CgExprId;
+use crate::cg::expr::{CgExpr, LitValue};
 use crate::cg::op::{ComputeOpKind, OpId, SpatialQueryKind};
 
 use super::error::LoweringError;
@@ -231,6 +234,20 @@ pub fn lower_spatial_queries(
 ///   `MaskPredicate` op's `DispatchShape::PerPair`; fold lowering
 ///   pushes a `CgStmt::ForEachNeighbor`. Both shapes are existing CG
 ///   IR — the helper doesn't allocate either; the call site does.
+/// The world-space radius a `spatial_query` / `query` declaration
+/// carries in its `@spatial(radius = R)` annotation. Recorded per query
+/// name on [`LoweringCtx::spatial_query_radii`] by the driver and
+/// lowered to a `CgTy::F32` expression at each walk site.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeclaredSpatialRadius {
+    /// `radius = 12.0` / `radius = 12`.
+    Literal(f32),
+    /// `radius = config.<block>.<field>` — the `"<block>.<field>"` key
+    /// into [`LoweringCtx::config_const_ids`]. Lowers to a config-const
+    /// read, so a `@runtime` config radius is honoured at its live value.
+    Config(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpatialIterShape {
     /// The recognised spatial-namespace flavour of the call —
@@ -247,6 +264,12 @@ pub struct SpatialIterShape {
     /// thread the radius from a call arg; the field is exposed now
     /// so consumers don't hard-code `1` independently of one another.
     pub radius_cells: u32,
+    /// The query's declared world-space radius (`@spatial(radius = R)`),
+    /// lowered to a `CgTy::F32` expression; `None` when the query
+    /// declares none (or is the legacy `query.nearby_agents` shape).
+    /// When `Some`, the walk emit ignores `radius_cells`: it visits every
+    /// cell overlapping `origin ± R` and gates candidates on `|d|² <= R²`.
+    pub radius: Option<CgExprId>,
 }
 
 /// Recognised spatial-namespace call flavours.
@@ -343,12 +366,15 @@ pub fn lower_spatial_namespace_call(
                     span,
                 });
             }
+            let radius = lower_declared_radius(method, span, _ctx)?;
             Ok(SpatialIterShape {
                 flavour: SpatialIterFlavour::Spatial {
                     method: method.to_string(),
                 },
-                // Hard-coded for v1; see SpatialIterShape::radius_cells.
+                // One ring for un-annotated queries; see
+                // SpatialIterShape::radius_cells / ::radius.
                 radius_cells: 1,
+                radius,
             })
         }
         NamespaceId::Query if method == "nearby_agents" => {
@@ -364,6 +390,7 @@ pub fn lower_spatial_namespace_call(
             Ok(SpatialIterShape {
                 flavour: SpatialIterFlavour::QueryNearbyAgents,
                 radius_cells: 1,
+                radius: None,
             })
         }
         _ => Err(LoweringError::UnsupportedNamespaceCall {
@@ -372,6 +399,46 @@ pub fn lower_spatial_namespace_call(
             span,
         }),
     }
+}
+
+/// Lower the declared `@spatial(radius = R)` of query `method` (if it
+/// has one) to a fresh `CgTy::F32` expression: a literal, or a
+/// config-const read for `config.<block>.<field>`. Returns `Ok(None)`
+/// for a query that declares no radius.
+///
+/// # Errors
+///
+/// [`LoweringError::UnknownConfigField`] when the radius names a config
+/// field that does not exist.
+fn lower_declared_radius(
+    method: &str,
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<Option<CgExprId>, LoweringError> {
+    let decl = match ctx.spatial_query_radii.get(method) {
+        Some(d) => d.clone(),
+        None => return Ok(None),
+    };
+    let expr = match decl {
+        DeclaredSpatialRadius::Literal(v) => CgExpr::Lit(LitValue::F32(v)),
+        DeclaredSpatialRadius::Config(key) => {
+            match ctx.config_const_ids.get(&(NamespaceId::Config, key.clone())) {
+                Some(id) => CgExpr::Read(DataHandle::ConfigConst { id: *id }),
+                None => {
+                    return Err(LoweringError::UnknownConfigField {
+                        ns: NamespaceId::Config,
+                        field: key,
+                        span,
+                    })
+                }
+            }
+        }
+    };
+    let id = ctx
+        .builder
+        .add_expr(expr)
+        .map_err(|e| LoweringError::BuilderRejected { error: e, span })?;
+    Ok(Some(id))
 }
 
 /// Convenience: recognise a spatial call from its `IrExpr` form.

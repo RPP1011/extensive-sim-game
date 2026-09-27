@@ -354,6 +354,16 @@ pub enum CgStmt {
         init: CgExprId,
         projection: CgExprId,
         radius_cells: u32,
+        /// World-space radius declared by the query's
+        /// `@spatial(radius = R)` annotation (a `CgTy::F32` literal or
+        /// config-const read). `Some` switches the walk to the
+        /// radius-honouring form: it visits every cell overlapping the
+        /// box `origin ± R` (bounds computed per thread, so any `R` —
+        /// including a `@runtime` config value — is covered) and gates each
+        /// candidate on `|candidate - origin|² <= R²`. `None` (an
+        /// un-annotated query) keeps the historical one-ring walk of
+        /// `radius_cells` with its loose cell-diagonal gate.
+        radius: Option<CgExprId>,
         /// The origin agent's id expression, supplied as the first arg
         /// to `spatial.<query>(<origin>, ...)`. Typed [`CgTy::AgentId`].
         /// The WGSL emit reads `agent_pos[<lowered origin>]` to compute
@@ -410,6 +420,9 @@ pub enum CgStmt {
         binder: LocalId,
         body: CgStmtListId,
         radius_cells: u32,
+        /// Declared world-space radius — see
+        /// [`Self::ForEachNeighbor::radius`].
+        radius: Option<CgExprId>,
         /// The origin agent's id expression, supplied as the first arg
         /// to `spatial.<query>(<origin>, ...)`. See
         /// [`Self::ForEachNeighbor::origin`] for the full contract — the
@@ -608,25 +621,35 @@ impl fmt::Display for CgStmt {
                 init,
                 projection,
                 radius_cells,
+                radius,
                 origin,
             } => {
                 write!(
                     f,
-                    "for_each_neighbor(acc={}: {}, init=expr#{}, proj=expr#{}, r={}, origin=expr#{})",
+                    "for_each_neighbor(acc={}: {}, init=expr#{}, proj=expr#{}, r={}, origin=expr#{}",
                     acc_local, acc_ty, init.0, projection.0, radius_cells, origin.0
-                )
+                )?;
+                if let Some(r) = radius {
+                    write!(f, ", radius=expr#{}", r.0)?;
+                }
+                write!(f, ")")
             }
             CgStmt::ForEachNeighborBody {
                 binder,
                 body,
                 radius_cells,
+                radius,
                 origin,
             } => {
                 write!(
                     f,
-                    "for_each_neighbor_body(binder={}, body=stmts#{}, r={}, origin=expr#{})",
+                    "for_each_neighbor_body(binder={}, body=stmts#{}, r={}, origin=expr#{}",
                     binder, body.0, radius_cells, origin.0
-                )
+                )?;
+                if let Some(r) = radius {
+                    write!(f, ", radius=expr#{}", r.0)?;
+                }
+                write!(f, ")")
             }
             CgStmt::ForEachAgentBody { binder, body } => {
                 write!(
@@ -1026,8 +1049,13 @@ pub fn collect_stmt_dependencies(
             collect_expr_reads(*projection, exprs, reads);
         }
         CgStmt::ForEachNeighbor {
-            init, projection, origin, ..
+            init, projection, origin, radius, ..
         } => {
+            // Declared-radius expression (literal or config const) —
+            // walked so a `@runtime` config radius surfaces its read.
+            if let Some(r) = radius {
+                collect_expr_reads(*r, exprs, reads);
+            }
             // Same shape as ForEachAgent for expr reads, plus three
             // structural reads for the spatial bindings the WGSL
             // emit walks: `spatial_grid_starts[cell..cell+1]` for
@@ -1077,7 +1105,10 @@ pub fn collect_stmt_dependencies(
                 target: super::data_handle::AgentRef::Self_,
             });
         }
-        CgStmt::ForEachNeighborBody { body, origin, .. } => {
+        CgStmt::ForEachNeighborBody { body, origin, radius, .. } => {
+            if let Some(r) = radius {
+                collect_expr_reads(*r, exprs, reads);
+            }
             // Body-form spatial walk. The body's own statements
             // contribute reads/writes via the recursive list walk
             // (e.g. an inner Emit's field-value reads + the host-

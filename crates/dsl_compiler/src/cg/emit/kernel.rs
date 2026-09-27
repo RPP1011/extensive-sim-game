@@ -5280,15 +5280,14 @@ fn tiled_per_cell_preamble(pos_prev: bool, vel_prev: bool) -> String {
     // After the three-phase counting sort, `spatial_grid_starts[c]`
     // is cell `c`'s start position in `spatial_grid_cells` and
     // `starts[c+1] - starts[c]` is the cell's count. The tile-load
-    // still caps at SPATIAL_MAX_PER_CELL (the workgroup-shared
-    // memory budget for the tile arrays), so cells with more than
-    // MAX_PER_CELL agents truncate at the tile-load boundary
-    // *visible to that workgroup's neighbors* — but they're NOT
-    // dropped from the spatial structure itself (the
-    // counting-sort layout is uncapped). The diagnostic kernel
-    // surfaces tile-truncation as the dropped_agents stat now
-    // computed against MAX_PER_CELL, which is the right knob to
-    // bump or split into multi-pass tile loads.
+    // caches at most SPATIAL_MAX_PER_CELL agents per neighbour cell
+    // (the workgroup-shared memory budget for the tile arrays), but
+    // `tile_count` records the full count and the fold walk
+    // (`emit_fused_for_each_neighbor`'s tiled branch) reads candidates
+    // past the tile from global memory — a dense cell is slower, never
+    // truncated. (Before the spatial-grid fix the count itself was
+    // capped here, silently dropping every agent past slot 32 of a
+    // neighbour cell from every query.)
     let pos_src = if pos_prev { "agent_pos_prev" } else { "agent_pos" };
     let vel_src = if vel_prev { "agent_vel_prev" } else { "agent_vel" };
     format!(
@@ -5299,26 +5298,35 @@ fn tiled_per_cell_preamble(pos_prev: bool, vel_prev: bool) -> String {
          let home_cx = home_cell % SPATIAL_GRID_DIM;\n\
          // Cooperative tile load: lanes 0..27 each load one neighbor\n\
          // cell. Lanes 27..MAX_PER_CELL skip the load (no-op).\n\
+         // tile_count holds the cell's FULL count; only the first\n\
+         // SPATIAL_MAX_PER_CELL agents are cached in the tile and the walk\n\
+         // reads the rest from global memory. Out-of-grid neighbours (home\n\
+         // cell on the world edge) get count 0 instead of being clamped\n\
+         // onto the edge cell, which would load it into several lanes.\n\
          if (lane < 27u) {{\n\
          \x20   let nbr = lane;\n\
          \x20   let dz = i32(nbr / 9u) - 1;\n\
          \x20   let dy = i32((nbr / 3u) % 3u) - 1;\n\
          \x20   let dx = i32(nbr % 3u) - 1;\n\
-         \x20   let _nbr_cell = cell_index(\n\
-         \x20       i32(home_cx) + dx,\n\
-         \x20       i32(home_cy) + dy,\n\
-         \x20       i32(home_cz) + dz,\n\
-         \x20   );\n\
-         \x20   let _nbr_start = spatial_grid_starts[_nbr_cell];\n\
-         \x20   let _nbr_end = spatial_grid_starts[_nbr_cell + 1u];\n\
-         \x20   let _nbr_count = min(_nbr_end - _nbr_start, SPATIAL_MAX_PER_CELL);\n\
-         \x20   tile_count[nbr] = _nbr_count;\n\
-         \x20   let _dst_base = nbr * SPATIAL_MAX_PER_CELL;\n\
-         \x20   for (var i: u32 = 0u; i < _nbr_count; i = i + 1u) {{\n\
-         \x20       let _aid = spatial_grid_cells[_nbr_start + i];\n\
-         \x20       tile_pos[_dst_base + i] = {pos_src}[_aid];\n\
-         \x20       tile_vel[_dst_base + i] = {vel_src}[_aid];\n\
+         \x20   var _nbr_count: u32 = 0u;\n\
+         \x20   if (cell_in_grid(i32(home_cx) + dx, i32(home_cy) + dy, i32(home_cz) + dz)) {{\n\
+         \x20       let _nbr_cell = cell_index(\n\
+         \x20           i32(home_cx) + dx,\n\
+         \x20           i32(home_cy) + dy,\n\
+         \x20           i32(home_cz) + dz,\n\
+         \x20       );\n\
+         \x20       let _nbr_start = spatial_grid_starts[_nbr_cell];\n\
+         \x20       let _nbr_end = spatial_grid_starts[_nbr_cell + 1u];\n\
+         \x20       _nbr_count = _nbr_end - _nbr_start;\n\
+         \x20       let _tile_n = min(_nbr_count, SPATIAL_MAX_PER_CELL);\n\
+         \x20       let _dst_base = nbr * SPATIAL_MAX_PER_CELL;\n\
+         \x20       for (var i: u32 = 0u; i < _tile_n; i = i + 1u) {{\n\
+         \x20           let _aid = spatial_grid_cells[_nbr_start + i];\n\
+         \x20           tile_pos[_dst_base + i] = {pos_src}[_aid];\n\
+         \x20           tile_vel[_dst_base + i] = {vel_src}[_aid];\n\
+         \x20       }}\n\
          \x20   }}\n\
+         \x20   tile_count[nbr] = _nbr_count;\n\
          }}\n\
          workgroupBarrier();\n\
          let _home_start = spatial_grid_starts[home_cell];\n\
@@ -5412,9 +5420,10 @@ const SPATIAL_BUILD_HASH_BODY: &str = "let cell = pos_to_cell(agent_pos[agent_id
 /// offsets buffer holds the *raw count* of agents per cell. No
 /// truncation — every agent contributes regardless of cell density.
 ///
-/// **Pre-condition**: the host clears `spatial_grid_offsets` to zero
-/// before dispatch (the boids_runtime `step()` does this via a
-/// `copy_buffer_to_buffer` from a pre-allocated zero source).
+/// **Pre-condition**: `spatial_grid_offsets` is all-zero on entry. The
+/// previous tick's `BuildHashScatter` guarantees this (it zeroes the
+/// buffer as its last step), and a fresh buffer is zero-initialised, so
+/// no host clear is needed.
 const SPATIAL_BUILD_HASH_COUNT_BODY: &str =
     "let cell = pos_to_cell(agent_pos[agent_id]);\n\
      atomicAdd(&spatial_grid_offsets[cell], 1u);";
@@ -5559,6 +5568,20 @@ fn spatial_build_hash_scan_add_body() -> String {
 // Slot = starts[cell] + running[cell] + rank — exactly the serial
 // result, block by block. `n` and the block bound are uniform, so the
 // barriers sit in uniform control flow.
+//
+// RESET (spatial-grid fix): after the last block `spatial_grid_offsets`
+// holds every cell's count again (the running cursor ends at the
+// count). Nothing clears the buffer before the NEXT tick's
+// `BuildHashCount`, whose atomicAdds therefore used to start from last
+// tick's counts: from the second tick on, every cell's slice
+// `starts[c]..starts[c+1]` was `count(t-1) + count(t)` wide, and its tail
+// re-read stale `spatial_grid_cells` entries left by earlier layouts —
+// agents counted twice (or more), agents from other cells appearing as
+// candidates, and zero-initialised slots surfacing as agent 0. The
+// scatter now zeroes the cursor itself as its final step, so the grid
+// build is self-contained (no host clear precondition) and every tick
+// starts from zero. `storageBarrier()` orders the zeroing after every
+// thread's last cursor bump.
 const SPATIAL_BUILD_HASH_SCATTER_BODY: &str =
     "let _t = gid.x;\n\
      let _n = cfg.agent_cap;\n\
@@ -5580,6 +5603,11 @@ const SPATIAL_BUILD_HASH_SCATTER_BODY: &str =
      \x20   workgroupBarrier();\n\
      \x20   if (_valid) { atomicAdd(&spatial_grid_offsets[_c], 1u); }\n\
      \x20   workgroupBarrier();\n\
+     }\n\
+     storageBarrier();\n\
+     let _num_cells = SPATIAL_GRID_DIM * SPATIAL_GRID_DIM * SPATIAL_GRID_DIM;\n\
+     for (var _rc = _t; _rc < _num_cells; _rc = _rc + 256u) {\n\
+     \x20   atomicStore(&spatial_grid_offsets[_rc], 0u);\n\
      }";
 
 /// WGSL body template for [`SpatialQueryKind::FilteredWalk`].

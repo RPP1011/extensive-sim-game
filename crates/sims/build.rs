@@ -162,6 +162,11 @@ fn main() {
                 | "play_probe"
                 // Subkind seeding (Plan A) — `init { spawn … }` runtime gate.
                 | "subkind_seeding_probe"
+                // Spatial-grid regression probe: declared `@spatial(radius)`
+                // honoured, dense cells (> MAX_PER_CELL) fully visible, no
+                // duplicate visits near/beyond the world edge
+                // (crates/sims/tests/spatial_grid_probe_pin.rs).
+                | "spatial_grid_probe"
         ) {
             continue;
         }

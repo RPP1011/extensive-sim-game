@@ -1683,8 +1683,11 @@ impl CgProgramBuilder {
                 self.check_expr_id(*projection)
             }
             CgStmt::ForEachNeighbor {
-                init, projection, origin, ..
+                init, projection, origin, radius, ..
             } => {
+                if let Some(r) = radius {
+                    self.check_expr_id(*r)?;
+                }
                 // Same shape as ForEachAgent for init/projection plus
                 // the Gap-dungeon_horde#1 origin expression (must
                 // already exist in the arena before the program is
@@ -1694,7 +1697,10 @@ impl CgProgramBuilder {
                 self.check_expr_id(*projection)?;
                 self.check_expr_id(*origin)
             }
-            CgStmt::ForEachNeighborBody { body, origin, .. } => {
+            CgStmt::ForEachNeighborBody { body, origin, radius, .. } => {
+                if let Some(r) = radius {
+                    self.check_expr_id(*r)?;
+                }
                 // The nested body stmt list must already exist; its
                 // children (statements + their expression ids) are
                 // validated when each was added. The `binder` LocalId

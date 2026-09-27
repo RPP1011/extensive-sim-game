@@ -519,6 +519,7 @@ pub fn lower_compilation_to_cg_with_opts(
     populate_variants_from_enums(comp, &mut ctx, &mut diagnostics);
     populate_actions(comp, &mut ctx, &mut diagnostics);
     populate_config_consts(comp, &mut ctx, &mut diagnostics);
+    populate_spatial_query_radii(comp, &mut ctx, &mut diagnostics);
     populate_views(comp, &mut ctx, &mut diagnostics);
     populate_view_bodies_and_signatures(comp, &mut ctx, &mut diagnostics);
     populate_namespace_registry(&mut ctx);
@@ -2214,6 +2215,46 @@ fn populate_config_consts(
                 ctx.builder.mark_config_const_runtime(id);
             }
         }
+    }
+}
+
+/// Record every `spatial_query` / `query` declaration's
+/// `@spatial(radius = R)` on [`LoweringCtx::spatial_query_radii`] so the
+/// walk lowering (`cg::lower::spatial::lower_spatial_namespace_call`)
+/// can honour it. `R` is a number literal or `config.<block>.<field>`;
+/// any other form is a diagnostic rather than a silently ignored radius
+/// (the pre-fix walk ignored every declared radius and always covered one
+/// 6-unit cell ring, whatever the query said).
+fn populate_spatial_query_radii(
+    comp: &Compilation,
+    ctx: &mut LoweringCtx<'_>,
+    diagnostics: &mut Vec<LoweringError>,
+) {
+    use super::spatial::DeclaredSpatialRadius;
+    use dsl_ast::ast::AnnotationValue;
+    for q in &comp.spatial_queries {
+        let radius_arg = q
+            .annotations
+            .iter()
+            .filter(|a| a.name == "spatial")
+            .flat_map(|a| a.args.iter())
+            .find(|arg| arg.key.as_deref() == Some("radius"));
+        let Some(arg) = radius_arg else { continue };
+        let declared = match &arg.value {
+            AnnotationValue::Float(v) => DeclaredSpatialRadius::Literal(*v as f32),
+            AnnotationValue::Int(v) => DeclaredSpatialRadius::Literal(*v as f32),
+            AnnotationValue::Ident(path) if path.starts_with("config.") => {
+                DeclaredSpatialRadius::Config(path["config.".len()..].to_string())
+            }
+            _ => {
+                diagnostics.push(LoweringError::UnsupportedAstNode {
+                    ast_label: "@spatial(radius = …) — expected a number literal or config.<block>.<field>",
+                    span: arg.span,
+                });
+                continue;
+            }
+        };
+        ctx.spatial_query_radii.insert(q.name.clone(), declared);
     }
 }
 

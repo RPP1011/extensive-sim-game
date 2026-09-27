@@ -8,23 +8,52 @@
 //! out-of-bounds slot reads), so both surfaces route through the
 //! same constants.
 //!
+//! ## Grid layout
+//!
+//! The grid is rebuilt every tick by a three-phase counting sort
+//! (`BuildHashCount` → `BuildHashScan*` → `BuildHashScatter`, see
+//! `cg/emit/kernel.rs`). Cell `c` owns the slice
+//! `spatial_grid_cells[spatial_grid_starts[c] .. spatial_grid_starts[c+1]]`,
+//! with agent ids in ascending order inside the slice. The layout is
+//! **uncapped**: a cell holds every agent that maps to it, however
+//! many. `spatial_grid_offsets` is scratch for the build only (per-cell
+//! count, then write cursor) and is left all-zero when the build ends,
+//! so the next tick's count starts from zero without any host clear.
+//!
+//! ## Walk semantics (the contract every `spatial.<query>(self)` walk follows)
+//!
+//! - **Declared radius.** A `spatial_query` / `query` carrying
+//!   `@spatial(radius = R)` walks every cell overlapping the axis-aligned
+//!   box `origin ± R` (computed per thread, so `R` may exceed
+//!   [`CELL_SIZE`] and may be a `@runtime` config value) and keeps
+//!   exactly the candidates with `|candidate - origin|² <= R²`. An
+//!   un-annotated query keeps the historical one-ring (3³ = 27 cell)
+//!   walk with its loose cell-diagonal gate.
+//! - **Each cell at most once.** Out-of-grid neighbour coordinates are
+//!   skipped (`cell_in_grid`), never clamped onto the edge cell — a
+//!   clamp would make a walk at the edge visit the same edge cell (and
+//!   every agent in it) two, four or eight times.
+//! - **Outside the world extent.** Positions beyond
+//!   ±[`WORLD_HALF_EXTENT`] still clamp into the edge cells (the grid
+//!   has no overflow bucket). Walks stay correct — the radius-derived
+//!   box is clamped the same way, so the edge cell holding them is
+//!   visited once and the per-candidate distance gate rejects the far
+//!   ones — but every out-of-world agent in the same edge column/row
+//!   is a candidate of every walk that touches that edge cell, so worlds
+//!   much larger than the extent pay for it in walk length.
+//!
 //! ## Sizing knobs
 //!
-//! - [`CELL_SIZE`] — edge length of one grid cell in world units. Set
-//!   to the largest fold radius any fixture queries (today: boids'
-//!   `perception_radius = 6.0`). Larger cells mean fewer cells to
-//!   walk per query (always a 3³=27 neighborhood for a single-cell-
-//!   radius query) at the cost of more candidates per cell.
+//! - [`CELL_SIZE`] — edge length of one grid cell in world units.
+//!   Matches boids' `perception_radius = 6.0` (the un-annotated
+//!   one-ring walk covers exactly one cell of reach). Radius-annotated
+//!   queries walk `~(2R / CELL_SIZE + 1)` cells per axis instead.
 //! - [`WORLD_HALF_EXTENT`] — half-edge of the cubic world along each
-//!   axis. Coordinates outside `[-extent, +extent]` clamp to the
-//!   edge cell. Set to 64.0 for boids — comfortably exceeds the ±8
-//!   initial spread so the flock has room to drift.
-//! - [`MAX_PER_CELL`] — cap on how many agents any single cell can
-//!   hold. Bounded-list counting sort: each agent does
-//!   `slot = atomicAdd(&offsets[cell], 1)`; if `slot >= MAX_PER_CELL`
-//!   the agent is silently dropped from queries that tick. 32 is
-//!   conservative for boids at thousand-scale; cluster-heavy
-//!   fixtures or higher densities may need more.
+//!   axis. See "Outside the world extent" above.
+//! - [`MAX_PER_CELL`] — the tiled PerCell kernel's per-neighbour-cell
+//!   workgroup tile budget (and its workgroup size). It does not cap
+//!   what a query sees: cells denser than this are read past the tile
+//!   from global memory.
 //!
 //! ## Derived
 //!
@@ -37,8 +66,13 @@ pub const CELL_SIZE: f32 = 6.0;
 /// Half-extent of the cubic world along each axis, world units.
 pub const WORLD_HALF_EXTENT: f32 = 64.0;
 
-/// Max agents per cell. Overflows are silently dropped from spatial
-/// queries on the same tick.
+/// Per-neighbour-cell tile budget of the tiled PerCell kernel (and its
+/// workgroup size, `PER_CELL_WORKGROUP_X`).
+///
+/// The counting-sort grid itself is uncapped (see the module docs); this
+/// constant only bounds how many agents per neighbour cell the tiled
+/// kernel caches in workgroup memory. Candidates past the tile are read
+/// from global memory, so no agent is dropped from a query.
 ///
 /// Workgroup-shared memory budget at MAX_PER_CELL=32 (the tiled
 /// MoveBoid kernel's tile arrays):
@@ -49,14 +83,10 @@ pub const WORLD_HALF_EXTENT: f32 = 64.0;
 ///   workgroup-memory across adapters.
 ///
 /// **Density caveat**: MAX_PER_CELL is also the workgroup size for
-/// PerCell-shaped kernels (see `PER_CELL_WORKGROUP_X`). Bumping it
-/// to absorb higher density (e.g. 64 to fit 1M agents in 22³ cells
-/// without truncation) doubles the workgroup size — most lanes go
-/// idle at typical density and the cooperative-load preamble pays
-/// for them. Decoupling these two knobs is a future refactor; for
-/// now MAX_PER_CELL=32 is the right balance for the boids fixture
-/// at ≤100k agents (~10/cell average — no overflow). Higher counts
-/// need either smaller cells or per-lane multi-iteration.
+/// PerCell-shaped kernels (see `PER_CELL_WORKGROUP_X`); the home-cell
+/// loop strides by it, so dense home cells are processed in several
+/// passes and dense neighbour cells spill to global reads — correct at
+/// any density, fastest at <= MAX_PER_CELL per cell.
 pub const MAX_PER_CELL: u32 = 32;
 
 /// Cells per axis: `ceil(2 * WORLD_HALF_EXTENT / CELL_SIZE)`. For the
@@ -118,7 +148,7 @@ pub fn compose_spatial_prelude(body: &str) -> String {
          \n\
          /// Map a world-space position to a flat cell index in [0, GRID_DIM^3).\n\
          /// Coordinates outside the world extent clamp to the boundary cell\n\
-         /// (silent clamp; no overflow path).\n\
+         /// (there is no overflow bucket; walks re-check distance).\n\
          fn pos_to_cell(p: vec3<f32>) -> u32 {{\n\
          \x20   let shifted = p + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT);\n\
          \x20   let cell_xyz_f = shifted / SPATIAL_CELL_SIZE;\n\
@@ -129,10 +159,31 @@ pub fn compose_spatial_prelude(body: &str) -> String {
          \x20   return (cz * SPATIAL_GRID_DIM + cy) * SPATIAL_GRID_DIM + cx;\n\
          }}\n\
          \n\
-         /// Recombine a (cx, cy, cz) triple into a flat cell index. Out-of-\n\
-         /// range components wrap via clamp; callers using neighbor offsets\n\
-         /// pass values in [-1, GRID_DIM] and rely on the clamp at the world\n\
-         /// boundary.\n\
+         /// Per-axis cell coordinates of a world position, clamped exactly\n\
+         /// like `pos_to_cell` (so an out-of-world position maps to the edge\n\
+         /// cell its agent was binned into). Radius walks bound their cell\n\
+         /// box with `pos_to_cell_xyz(origin -/+ R)`.\n\
+         fn pos_to_cell_xyz(p: vec3<f32>) -> vec3<i32> {{\n\
+         \x20   let f = (p + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
+         \x20   let m = i32(SPATIAL_GRID_DIM) - 1;\n\
+         \x20   return vec3<i32>(\n\
+         \x20       clamp(i32(max(f.x, 0.0)), 0, m),\n\
+         \x20       clamp(i32(max(f.y, 0.0)), 0, m),\n\
+         \x20       clamp(i32(max(f.z, 0.0)), 0, m),\n\
+         \x20   );\n\
+         }}\n\
+         \n\
+         /// True iff (cx, cy, cz) is a real grid cell. Neighbour walks skip\n\
+         /// out-of-grid offsets with this instead of clamping them: a clamp\n\
+         /// would revisit the edge cell and count its agents repeatedly.\n\
+         fn cell_in_grid(cx: i32, cy: i32, cz: i32) -> bool {{\n\
+         \x20   let d = i32(SPATIAL_GRID_DIM);\n\
+         \x20   return cx >= 0 && cx < d && cy >= 0 && cy < d && cz >= 0 && cz < d;\n\
+         }}\n\
+         \n\
+         /// Recombine a (cx, cy, cz) triple into a flat cell index. Callers\n\
+         /// pass in-grid coordinates (neighbour walks gate on `cell_in_grid`\n\
+         /// first); the clamp only keeps a stray call in bounds.\n\
          fn cell_index(cx: i32, cy: i32, cz: i32) -> u32 {{\n\
          \x20   let max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
          \x20   let xx = u32(clamp(cx, 0, max_idx));\n\

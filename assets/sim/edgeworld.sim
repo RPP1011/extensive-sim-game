@@ -79,7 +79,9 @@ config edgeworld {
   regrow_rate:     f32 = 0.014,
   // FoodNode quantity ceiling.
   food_max:        f32 = 5.0,
-  // Spatial perception radius for eating (matches @spatial below).
+  // Nominal eating reach. NOT the `nearby_food` query radius: Phase 0
+  // eating is world-wide (see move_speed below and the `nearby_food`
+  // declaration); only the host-side eating pin seeds within this reach.
   eat_radius:      f32 = 1.5,
   // SeekFood movement: fraction of the (food - self) vector a hungry
   // survivor steps each tick toward the first food in perception. Kept
@@ -204,12 +206,22 @@ physics WolfHunger @phase(per_agent) {
 // Spatial-grid filter — body-form pattern (same as
 // detective_investigation / predator_prey_real / trophic_3tier).
 // The body-side `if` does the actual creature_type + quantity filter.
-@spatial(radius = 1.5, kind = [Agent])
+//
+// RADIUS = the whole arena. Phase 0 eating is position-independent by
+// design (see `move_speed` in the config block): every pin in
+// edgeworld_pin.rs was tuned on a world where a survivor feeds without
+// converging on a food node. That used to hold only by accident — the
+// spatial grid ignored every declared radius and walked a fixed 27-cell
+// ring (6-12 units here, plus duplicate visits), so the old
+// `radius = 1.5` never applied. The grid now honours the declared radius
+// exactly, so the intent is stated explicitly: 46 > the diagonal of the
+// [-16, 16]² arena (45.3), i.e. every food node is in reach.
+@spatial(radius = 46.0, kind = [Agent])
 spatial_query nearby_food(self: AgentId, candidate: AgentId) =
   candidate != self
 
-// Eat — each alive, hungry Survivor walks its 27-cell neighbourhood
-// and feeds off any co-located FoodNode that still has quantity.
+// Eat — each alive, hungry Survivor walks `nearby_food` (the whole
+// arena, see above) and feeds off any FoodNode that still has quantity.
 //
 // EAT PATH: PRIMARY shape (direct in-loop neighbour write). The
 // survivor lowers its OWN hunger (self-write, proven) AND directly

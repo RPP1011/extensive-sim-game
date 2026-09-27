@@ -756,18 +756,25 @@ fn edgeworld_lingering_fear_after_wolf_leaves() {
         Some(read_fear(&mut state, 2)[0])
     }
 
-    // BUILD=5 sightings raise fear to ~4.34 (verified on-GPU). From there the
-    // observed *0.75/tick decay (empirically measured, clean at these short
-    // horizons — well before the ~tick-19 column freeze):
-    //   * SHORT horizon (2 decay ticks): ~2.44 — still WARY (> 1.5).
-    //   * LONG  horizon (5 decay ticks): ~1.03 — foraging RESUMES (< 1.5).
-    // Both land by total tick 10 (well under the freeze), and both clear the
-    // 1.5 threshold by a comfortable margin (≈0.94 above / ≈0.47 below) so the
-    // crossing is robust to GPU f32 jitter. (BUILD must stay LOW — a high
-    // BUILD saturates the column into the frozen/inflated regime where the
-    // clean geometric decay no longer holds.)
+    // BUILD=5 sightings raise fear along the fixture's designed sequence
+    // f <- (f + 1) * 0.75: 0.75, 1.31, 1.73, 2.05, 2.29 (steady state 3.0;
+    // see the fear_threshold comment in edgeworld.sim). From there the
+    // *0.75/tick decay gives:
+    //   * SHORT horizon (1 decay tick):  ~1.72 — still WARY (> 1.5).
+    //   * LONG  horizon (5 decay ticks): ~0.54 — foraging RESUMES (< 1.5).
+    // Margins ≈0.22 above / ≈0.96 below the 1.5 threshold.
+    //
+    // RECALIBRATED (spatial-grid fix). This pin used to read ~4.34 after
+    // BUILD=5 — above the model's own 3.0 steady state — and use SHORT=2
+    // (~2.44). The excess was the grid bug, not fear dynamics: from the
+    // second tick on the grid re-read stale per-cell slots, so the single
+    // wolf was "sighted" several times per tick (the "column freeze /
+    // inflated regime" this comment used to warn about). The walk now
+    // visits each agent once, fear follows the designed sequence exactly,
+    // and SHORT=2 would land at 2.29 * 0.5625 = 1.29 — genuinely below the
+    // threshold — so the short horizon is one decay tick.
     const BUILD: usize = 5;
-    const SHORT: usize = 2;
+    const SHORT: usize = 1;
     const LONG: usize = 5;
     let (Some(fear_short), Some(fear_long)) =
         (run_lingering(BUILD, SHORT), run_lingering(BUILD, LONG))

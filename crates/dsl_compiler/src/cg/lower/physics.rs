@@ -1243,6 +1243,7 @@ fn lower_for_spatial_body(
         binder: binder_local,
         body: inner_list_id,
         radius_cells: shape.radius_cells,
+        radius: shape.radius,
         origin: origin_id,
     };
     push_stmt(stmt, span, ctx)
@@ -1602,7 +1603,15 @@ fn is_tile_eligible_body(
             None => return false,
         };
         match stmt {
-            CgStmt::ForEachNeighbor { init, projection, .. } => {
+            CgStmt::ForEachNeighbor { init, projection, radius, .. } => {
+                // A declared `@spatial(radius = R)` walk covers however
+                // many cells R spans; the tiled kernel's cooperative
+                // load only holds the fixed 27-cell one-ring
+                // neighbourhood, so radius walks stay on the PerAgent
+                // global-memory walk.
+                if radius.is_some() {
+                    return false;
+                }
                 if !expr_is_pure_for_hoisting_in_prog(*init, prog)
                     || !expr_is_pure_for_hoisting_in_prog(*projection, prog)
                 {

@@ -179,6 +179,14 @@ pub struct LoweringCtx<'a> {
     /// [`LoweringError::UnsupportedNamespaceField`] now only fires for
     /// non-`Config` namespaces.
     pub config_const_ids: HashMap<(NamespaceId, String), ConfigConstId>,
+    /// `spatial_query` / `query` name → the world-space radius its
+    /// `@spatial(radius = R)` annotation declares. Populated by the
+    /// driver's `populate_spatial_query_radii`; consumed by
+    /// [`super::spatial::lower_spatial_namespace_call`], which lowers the
+    /// entry to a `CgTy::F32` expression carried on the walk stmt
+    /// (`CgStmt::ForEachNeighbor{,Body}::radius`). A query absent from
+    /// the map has no declared radius and keeps the one-ring walk.
+    pub spatial_query_radii: HashMap<String, super::spatial::DeclaredSpatialRadius>,
     /// Captured `@lazy` view bodies for at-call-site inlining.
     /// `ViewId` → snapshot. Populated by
     /// [`super::view::lower_view`]'s lazy arm in Phase 2; consumed by
@@ -344,6 +352,7 @@ impl<'a> LoweringCtx<'a> {
             target_local: false,
             current_per_agent_rule: false,
             config_const_ids: HashMap::new(),
+            spatial_query_radii: HashMap::new(),
             lazy_view_bodies: HashMap::new(),
             local_tys: HashMap::new(),
             event_layouts: HashMap::new(),
@@ -3013,13 +3022,13 @@ fn lower_fold_over_agents(
     // - `agents` — the unbounded N²-walk path lowered to
     //   `CgStmt::ForEachAgent`. Visits every alive agent slot.
     // - `spatial.<method>(self, ...)` — the bounded spatial-grid walk
-    //   path lowered to `CgStmt::ForEachNeighbor`. Visits only the
-    //   3³=27 cells surrounding the calling agent's cell. Today the
-    //   `<method>` name is informational (any registered
-    //   spatial_query is accepted); the cell-radius is hard-coded to
-    //   1 because the runtime sizes its CELL_SIZE constant equal to
-    //   the per-fixture perception radius. A future surface will
-    //   thread the radius from the call args.
+    //   path lowered to `CgStmt::ForEachNeighbor`. When the query
+    //   declares `@spatial(radius = R)` the walk covers every cell
+    //   within R and keeps exactly the candidates within R
+    //   (`SpatialIterShape::radius`); an un-annotated query walks the
+    //   3³=27 cells around the calling agent's cell. The query's
+    //   filter expression is not applied here (bodies filter
+    //   themselves).
     //
     // Slice 2a (stdlib-into-CG-IR plan): the spatial-iter recognition
     // is delegated to `super::spatial::try_recognise_spatial_iter`
@@ -3193,12 +3202,12 @@ fn lower_fold_over_agents(
             acc_ty,
             init: init_id,
             projection: projection_id,
-            // Cell radius comes from the helper-recognised shape.
-            // Today every shape returns 1 (CELL_SIZE matches each
-            // fixture's perception radius, so a 3³ neighbourhood
-            // covers it); when the helper threads call-arg radii
-            // through, this picks up the new value automatically.
+            // Cell radius comes from the helper-recognised shape
+            // (one ring). `radius` is the query's declared
+            // `@spatial(radius = R)`, when it has one; the emit then
+            // derives the cell box from R instead of the ring.
             radius_cells: shape.radius_cells,
+            radius: shape.radius,
             origin,
         }
     } else {

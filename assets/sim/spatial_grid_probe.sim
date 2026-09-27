@@ -1,0 +1,115 @@
+// spatial_grid_probe — regression probe for the uniform spatial grid
+// that backs every `spatial.<query>(self)` walk (fold form and body
+// form). Driven by crates/sims/tests/spatial_grid_probe_pin.rs, which
+// seeds positions + tags on the host and compares every output field
+// against a CPU brute-force reference.
+//
+// What each rule pins:
+//   * ProbeRadius  — `@spatial(radius = R)` queries see EVERY candidate
+//     within R (not just the 27 cells around self) and NOTHING beyond it
+//     (the declared radius is the per-candidate gate). R = 30.5 is ~5
+//     grid cells; R = 2.5 is under one cell.
+//   * ProbeBody    — the body form (`for o in spatial.<q>(self) { … }`)
+//     honours the declared radius the same way.
+//   * ProbeLegacy  — an UN-annotated query keeps the historical
+//     one-ring (27-cell) walk. Its body is pure folds + sets, so the
+//     compiler retags it to the tiled PerCell kernel: this is the path
+//     that used to truncate neighbour cells at MAX_PER_CELL (32).
+//   * ProbeLegacyBody — the same un-annotated query through the
+//     per-agent (non-tiled) body-form walk.
+//
+// Every `seen_*` field is a sum of 1.0 over a UNIQUE-agent predicate
+// (`o.tag == self.watch`, tags are host-seeded unique), so it must be
+// exactly 0.0 or 1.0 — anything else is a duplicate visit.
+//
+// Positions are integer-valued and radii are x.5 so no candidate sits
+// exactly on a radius boundary (the CPU reference and the GPU agree
+// bit-for-bit on integer squared distances).
+
+event Tick { }
+
+entity Probe : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+field tag:               u32
+field watch:             u32
+field seen_far:          f32
+field total_far:         f32
+field seen_near:         f32
+field total_near:        f32
+field seen_body:         f32
+field total_body:        f32
+field seen_legacy:       f32
+field total_legacy:      f32
+field seen_legacy_body:  f32
+
+@spatial(radius = 30.5, kind = [Agent])
+spatial_query probe_far(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+@spatial(radius = 2.5, kind = [Agent])
+spatial_query probe_near(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+spatial_query probe_legacy(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+physics ProbeRadius @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    let seen_far = sum(o in spatial.probe_far(self) where
+      if (o.tag == self.watch) { 1.0 } else { 0.0 });
+    let total_far = sum(o in spatial.probe_far(self) where
+      if (o.alive) { 1.0 } else { 0.0 });
+    let seen_near = sum(o in spatial.probe_near(self) where
+      if (o.tag == self.watch) { 1.0 } else { 0.0 });
+    let total_near = sum(o in spatial.probe_near(self) where
+      if (o.alive) { 1.0 } else { 0.0 });
+    agents.set_seen_far(self, seen_far);
+    agents.set_total_far(self, total_far);
+    agents.set_seen_near(self, seen_near);
+    agents.set_total_near(self, total_near);
+  }
+}
+
+physics ProbeBody @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    agents.set_seen_body(self, 0.0);
+    agents.set_total_body(self, 0.0);
+    for o in spatial.probe_far(self) {
+      if (o.tag == self.watch) {
+        agents.set_seen_body(self, self.seen_body + 1.0);
+      }
+      agents.set_total_body(self, self.total_body + 1.0);
+    }
+  }
+}
+
+physics ProbeLegacy @phase(per_agent) {
+  on Tick {} {
+    let seen = sum(o in spatial.probe_legacy(self) where
+      if (o.tag == self.watch) { 1.0 } else { 0.0 });
+    let total = sum(o in spatial.probe_legacy(self) where
+      if (o.alive) { 1.0 } else { 0.0 });
+    // The tiled kernel's cooperative tile load reads agent_vel
+    // unconditionally (it was written for boids), so the body must read
+    // a candidate's vel for that binding to exist. Every vel is zero, so
+    // this is a no-op write.
+    let drift = sum(o in spatial.probe_legacy(self) where o.vel);
+    agents.set_seen_legacy(self, seen);
+    agents.set_total_legacy(self, total);
+    agents.set_vel(self, drift);
+  }
+}
+
+physics ProbeLegacyBody @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    agents.set_seen_legacy_body(self, 0.0);
+    for o in spatial.probe_legacy(self) {
+      if (o.tag == self.watch) {
+        agents.set_seen_legacy_body(self, self.seen_legacy_body + 1.0);
+      }
+    }
+  }
+}
