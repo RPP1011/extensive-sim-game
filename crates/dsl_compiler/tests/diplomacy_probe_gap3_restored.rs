@@ -133,14 +133,17 @@ verb Heal(self, target: Agent) =
     }
 
     // The typed Mod arm emits `(tick % config_<id>)`. There must be
-    // one occurrence per verb (three total) somewhere in the WGSL —
+    // two occurrences per verb (six total) somewhere in the WGSL — one
+    // in the verb's mask predicate and one in its scoring-row guard,
+    // which re-applies the same target-dependent `when` per candidate
+    // (`cg::lower::driver::wire_scoring_pair_guards`) —
     // pre-fix the f32 promotion would have either failed lowering or
     // emitted a `bitcast<f32>` indirection. The exact fused-kernel
     // home of each occurrence drifts as the schedule composer
     // evolves, so we count globally across all bodies.
     let total_typed_mods = all_bodies.matches("(tick % config_").count();
     assert_eq!(
-        total_typed_mods, 3,
-        "expected exactly 3 `(tick % config_<id>)` occurrences (one per verb); got {total_typed_mods}",
+        total_typed_mods, 6,
+        "expected exactly 6 `(tick % config_<id>)` occurrences (mask + scoring guard per verb); got {total_typed_mods}",
     );
 }
