@@ -113,21 +113,17 @@ fn radius_walk_emits_land_once_per_neighbour() {
     assert_eq!((seen, taken), again, "same-seed reruns diverged");
 }
 
-/// KNOWN ENGINE DEFECT (pre-existing on 370557ec; not a spatial-walk bug).
+/// Fold rows survive a busy following tick.
 ///
-/// View folds consume the PRIOR tick's events from the same ring the
-/// current tick's producers write into: at tick start the runtime
-/// snapshots the tail into `prev_event_tail_buf`, sorts the prior rows
-/// in place by target, then resets the tail to 0 — so every row a
-/// producer emits before a fold runs overwrites a prior-tick row at the
-/// head of the ring. Sorted by target, the head holds the LOWEST target
-/// ids. Here `Chat` emits on the tick after each pulse and is scheduled
-/// before `FoldBumpsTaken`: the pair (slots 0 and 1) still see each
-/// other (`seen_near` = 3), but none of their Bumped rows reach the view
-/// (0 of 3). This is the webband colony's "parked pair's brawls never
-/// landed" (colonist slots 1/2, 16 same-tick rows over-writing the head).
+/// View folds consume the PRIOR tick's events. Here `Chat` emits on the
+/// tick after each pulse and is scheduled before `FoldBumpsTaken`; the
+/// prior-tick rows it would overwrite in the live ring (the sorted head,
+/// i.e. the lowest target ids — the pair in slots 0/1) must still reach
+/// the view exactly once. Failed on 370557ec..dc05a9ca (0 of 3 landed —
+/// the webband colony's "parked pair's brawls never landed"); folds now
+/// read a tick-start snapshot of the prior-tick rows
+/// (`fold_event_ring_buf`, dsl_compiler build_helper.rs).
 #[test]
-#[ignore = "known engine defect: prior-tick fold rows overwritten by same-tick producers"]
 fn fold_rows_survive_a_busy_following_tick() {
     let pos = layout();
     let Some((seen, taken)) = run(&pos, true) else {

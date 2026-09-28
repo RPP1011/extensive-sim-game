@@ -7,8 +7,9 @@
 // the Bumped events must land in `bumps_taken` exactly once each; a
 // third agent 3.0u away (outside radius 2) must see nobody.
 //
-// `Chat` (off unless the host sets `chatty`) reproduces a separate,
-// pre-existing event-ring defect: see the `#[ignore]`d test in the pin.
+// `Chat` (off unless the host sets `chatty`) fills the ring on the tick
+// after each pulse, before the fold runs: the prior-tick Bumped rows must
+// still land (`fold_rows_survive_a_busy_following_tick` in the pin).
 
 event Tick { }
 

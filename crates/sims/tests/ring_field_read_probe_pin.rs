@@ -8,9 +8,10 @@
 //!
 //! Uses `per_entity_ring_struct_probe`'s exact, already-proven write
 //! shape and wraparound values as the known-good baseline: after 7
-//! appends, cell 0 = (timestamp=5, amount=60.0), cell 3 = (timestamp=4,
-//! amount=50.0) (see that pin's own trace/assertions for the full
-//! fill-then-wrap sequence). `ReadBackCells` reads exactly those two
+//! appends, cell 0 = (timestamp=5, amount=50.0), cell 3 = (timestamp=4,
+//! amount=40.0) (see that pin's own trace/assertions for the full
+//! fill-then-wrap sequence, and its note on the re-pin: the amounts
+//! moved down one tick when folds stopped reading this tick's rows). `ReadBackCells` reads exactly those two
 //! cells' two fields each, every tick, via the NEW primitive — if the
 //! read side's key/index/field-offset arithmetic disagrees with the
 //! write side's in ANY way, this catches it as a wrong value, not a
@@ -42,8 +43,8 @@ fn ring_field_read_matches_the_known_good_write_side_values() {
     let buf = state.agent_read_cell3_amount_buf.clone();
     let cell3_amt = read_f32(&mut state, &buf, 1)[0];
 
-    assert_eq!((cell0_ts, cell0_amt), (5, 60.0), "cell 0 (timestamp, amount) read back wrong via the new ring-field-read primitive");
-    assert_eq!((cell3_ts, cell3_amt), (4, 50.0), "cell 3 (timestamp, amount) read back wrong via the new ring-field-read primitive");
+    assert_eq!((cell0_ts, cell0_amt), (5, 50.0), "cell 0 (timestamp, amount) read back wrong via the new ring-field-read primitive");
+    assert_eq!((cell3_ts, cell3_amt), (4, 40.0), "cell 3 (timestamp, amount) read back wrong via the new ring-field-read primitive");
 }
 
 fn read_f32(state: &mut GeneratedRuntime, buf: &wgpu::Buffer, count: usize) -> Vec<f32> {

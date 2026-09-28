@@ -8,15 +8,26 @@
 //! but nothing had confirmed it end to end on real GPU hardware before
 //! this.
 //!
-//! `world.tick` reads 1 on the FIRST `step()`, not 0 (found empirically
-//! via a per-tick trace, not assumed) — so with `inject_base=10,
-//! inject_step=10` the N-th append carries amount `10*(N+1)`: 20, 30,
-//! 40, 50, 60, 70, 80, ... Two checkpoints: after exactly 4 appends the
+//! Events emitted on tick T are folded on tick T+1, so the first
+//! `step()` appends nothing and, with `inject_base=10, inject_step=10`,
+//! the N-th append carries the tick-(N-1) amount `10*N`: 10, 20, 30, 40,
+//! 50, 60, 70, ... Two checkpoints: after exactly 4 appends the
 //! ring is exactly full with no wrap yet; after exactly 7, three slots
 //! have wrapped once. Agent 1 receives nothing (`InjectDamage` damages
 //! `self`, gated on `self.alive` — agent 1 stays alive=0 on purpose,
 //! not via the `target_slot` config value, which is documented but not
 //! actually wired into the emit) and must stay all-zero throughout.
+//!
+//! **Re-pinned with the fold-ring snapshot fix (fix/spatial-grid).**
+//! The values used to be one tick "ahead" (20, 30, 40, 50, … — read as
+//! "`world.tick` is 1 on the first step"). That was the fold-row bug,
+//! not tick numbering: folds consume the PRIOR tick's events, but read
+//! them from the live ring after the tail reset, and `InjectDamage`
+//! (scheduled before the fold) had already overwritten slot 0 with the
+//! CURRENT tick's event — so each fold appended this tick's amount
+//! instead of last tick's. Folds now read a tick-start snapshot of the
+//! prior-tick rows: the tick-0 emit (amount 10) is folded on the second
+//! step, and the N-th append carries amount `10*N`.
 
 use sims::per_entity_ring_probe::GeneratedRuntime;
 
@@ -46,16 +57,16 @@ fn ring_append_fills_then_wraps_at_k_fifo() {
     }
     assert_eq!(
         &primary[0..4],
-        &[20.0, 30.0, 40.0, 50.0],
+        &[10.0, 20.0, 30.0, 40.0],
         "after exactly 4 appends (K=4) the ring should hold all 4 values in arrival order, no wrap yet: {:?}",
         &primary[0..4]
     );
     assert_eq!(&primary[4..8], &[0.0, 0.0, 0.0, 0.0], "agent 1 (untouched control) should still be all-zero: {:?}", &primary[4..8]);
     assert_eq!(cursor, vec![4, 0], "cursor should read 4 raw appends for agent 0, 0 for agent 1: {cursor:?}");
 
-    // Checkpoint 2: 3 more appends (steps 5-7, amounts 60/70/80) —
-    // slots 0, 1, 2 each wrap exactly once (cursor%4 for append counts
-    // 5,6,7 is 0,1,2); slot 3 (from append 4, value 50) is untouched.
+    // Checkpoint 2: 3 more appends (amounts 50/60/70) — slots 0, 1, 2
+    // each wrap exactly once (cursor%4 for append counts 5,6,7 is
+    // 0,1,2); slot 3 (from append 4, value 40) is untouched.
     for _ in 0..3 {
         state.step();
         primary = { let b = state.view_storage_recent_damages_primary_buf.clone(); read_f32(&mut state, &b, 2 * 4) };
@@ -63,8 +74,8 @@ fn ring_append_fills_then_wraps_at_k_fifo() {
     }
     assert_eq!(
         &primary[0..4],
-        &[60.0, 70.0, 80.0, 50.0],
-        "after 7 appends (K=4) slots 0-2 should each have wrapped once (60,70,80), slot 3 (50) untouched: {:?}",
+        &[50.0, 60.0, 70.0, 40.0],
+        "after 7 appends (K=4) slots 0-2 should each have wrapped once (50,60,70), slot 3 (40) untouched: {:?}",
         &primary[0..4]
     );
     assert_eq!(&primary[4..8], &[0.0, 0.0, 0.0, 0.0], "agent 1 should still be all-zero after agent 0's wraps: {:?}", &primary[4..8]);
