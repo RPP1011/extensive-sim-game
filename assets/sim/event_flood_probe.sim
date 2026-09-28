@@ -1,0 +1,50 @@
+// event_flood_probe — regression fixture: a per-event consumer must
+// consume EVERY same-tick event exactly once, even when the ring holds
+// far more events than there are agents.
+//
+// Every agent emits FOUR `Ping` events per tick (k = 0..3), so the live
+// ring holds 4 × agent_count records. The `@phase(post)` consumer bumps
+// one counter per (emitter, k) — four distinct fields, so each counter
+// has exactly one writer per tick and the plain parallel apply is
+// race-free. After T ticks every counter must equal exactly T: a lower
+// value means dropped events (per-event kernels used to dispatch only
+// `agent_cap` threads, so ring slots >= agent_cap were never consumed),
+// a higher one double consumption.
+//
+// Pinned by `crates/sims/tests/event_flood_probe_pin.rs`.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Ping { who: AgentId, k: u32 }
+
+entity Pinger : Agent { }
+
+field cnt0: u32
+field cnt1: u32
+field cnt2: u32
+field cnt3: u32
+
+init {
+  alive: 1,
+}
+
+@phase(per_agent)
+physics EmitPings {
+  on Tick {} where (self.alive) {
+    emit Ping { who: self, k: 0u }
+    emit Ping { who: self, k: 1u }
+    emit Ping { who: self, k: 2u }
+    emit Ping { who: self, k: 3u }
+  }
+}
+
+@phase(post)
+physics CountPings {
+  on Ping { who: w, k: k } {
+    if (k == 0u) { agents.set_cnt0(w, agents.cnt0(w) + 1u); }
+    if (k == 1u) { agents.set_cnt1(w, agents.cnt1(w) + 1u); }
+    if (k == 2u) { agents.set_cnt2(w, agents.cnt2(w) + 1u); }
+    if (k == 3u) { agents.set_cnt3(w, agents.cnt3(w) + 1u); }
+  }
+}

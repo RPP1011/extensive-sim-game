@@ -315,7 +315,7 @@ Names may be the handler's pattern binders (`t`, `p`, `w` above) or the event's 
 4. *Losers observe losing* through that same mechanism: whatever the body does when its guard fails runs for every losing event, in the same tick (count a loss, stamp `lost_tick`, clear an intent field). An agent whose claim lost still has its claim field unset afterwards, so its verb can simply fire again next tick — no phase slot needed.
 5. *Accumulation.* Read-modify-write on the key entity (`set_stock(t, stock(t) - 1u)`, `set_ledger(t, ledger(t) + s)`, `hp -= dmg`) sees every earlier contribution, so nothing is lost; because the order is fixed, even f32 sums are bit-identical run to run and across processes. A guarded decrement (`if (stock(t) >= 1u) { … } else { … }`) hands the last units to the first events in order.
 6. *No CAS promotion.* The claim-CAS rewrite applied to un-annotated consumers (which picks a scheduling-dependent winner and cannot express an `else`) is not applied to `@serial` consumers; their `if/else` bodies lower verbatim.
-7. *Kernel isolation.* A `@serial` consumer is never fused with a sibling op, and it sees the whole live ring (its kernel walks the ring with a grid stride, so it is not limited to `agent_cap` events the way default per-event consumers are — see *Limitations*).
+7. *Kernel isolation.* A `@serial` consumer is never fused with a sibling op. Like every per-event kernel it sees the whole live ring (see §6.2).
 
 **Rules the body must follow for the result to be deterministic.**
 
@@ -330,7 +330,6 @@ Names may be the handler's pattern binders (`t`, `p`, `w` above) or the event's 
 
 - The winner rule is expressed through `order`; there is no per-group "top K" primitive beyond writing the guard in the body.
 - One huge group is single-threaded (see *Cost*).
-- *Pre-existing, affects every consumer that is NOT `@serial`:* per-event kernels are dispatched `agent_cap` threads wide, so events written at ring slot ≥ `agent_cap` in a tick are never seen by them (`cfg.event_count` bounds the loop, but no thread exists for those slots). Any tick whose ring holds more events than there are agents — every agent emitting an `ActionSelected` plus a verb event is already 2×N — silently drops the tail for those consumers. `@serial` consumers are not affected.
 
 Pinned by `crates/sims/tests/contention_probe_pin.rs` (fixtures `assets/sim/contention_claim_probe.sim`, `assets/sim/contention_stock_probe.sim`: GPU state equals a host serial reference bit-for-bit, identical across repeated runs and across processes, under ~1000-way contention every tick) and `crates/dsl_compiler/tests/serial_consumer_emit.rs` (lowering, emitted driver, fusion isolation, naga validation, diagnostics).
 
@@ -882,6 +881,7 @@ Runtime constants: `MAX_ANNOUNCE_RECIPIENTS` (default 64); `OVERHEAR_RANGE_FRACT
 - Agent processing order is deterministically shuffled each tick via an RNG-seeded permutation.
 - Events emitted within a phase are collected in append order; handlers process them deterministically.
 - **GPU caveat (per-event consumers):** on the compiled GPU path, ring append order is decided by `atomicAdd` and per-event consumers apply same-tick events in parallel against pre-dispatch state, so two same-tick events touching the same state resolve by scheduling. Consumers that contend on shared state must be annotated `@serial(...)` (§2.4.1) to get a scheduling-independent, bit-reproducible result.
+- **Every live event is consumed exactly once.** Per-event kernels (chronicle consumers, `@serial` consumers, CAS and ring-append view folds) are dispatched with an agent-sized thread count, so each thread walks the live ring with a grid stride (`for (i = gid; i < min(event_count, ring_cap); i += total_threads)`); a tick may hold any number of events up to the ring capacity, independent of the agent count. Pinned by `crates/sims/tests/event_flood_probe_pin.rs` (4 events per agent per tick).
 - Text generation (`ChronicleEntry.text`, LLM prose) is `@non_replayable` (§9 #21): templates render eagerly at event emission; an async LLM pass may rewrite entries in flagged categories.
 
 ### 6.3 Replay scope

@@ -164,6 +164,7 @@ fn main() {
                 | "subkind_seeding_probe"
                 | "contention_claim_probe"
                 | "contention_stock_probe"
+                | "event_flood_probe"
         ) {
             continue;
         }

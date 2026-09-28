@@ -105,8 +105,8 @@ fn serial_kernel_carries_driver_and_skips_claim_cas() {
         "let event_idx: u32 = _sg_buf[_sg_q];",
         // Grid-stride over the whole live ring, not one slot per thread
         // (PerEvent kernels are dispatched only agent_cap threads wide).
-        "@builtin(num_workgroups) _sg_nwg: vec3<u32>",
-        "_sg_ev = _sg_ev + _sg_nwg.x * 64u",
+        "@builtin(num_workgroups) _ev_nwg: vec3<u32>",
+        "_ev_i = _ev_i + _ev_nwg.x * 64u",
         // p desc is bit-inverted into an ascending key; w stays as-is.
         "let _sg_me0: u32 = (~event_ring[event_idx * 11u + 4u]);",
         "let _sg_me1: u32 = event_ring[event_idx * 11u + 2u];",
