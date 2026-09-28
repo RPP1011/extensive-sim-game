@@ -407,6 +407,8 @@ verb Pray(self, shrine: Structure) =
 
 The compiler expands a `verb` into: (1) a mask entry narrowing an existing primitive, (2) a cascade handler that emits the declared event on successful action application, (3) a scoring entry appended to the scoring table.
 
+**Target selection.** For a verb with a `target: Agent` parameter the `when` clause is a per-(actor, candidate) predicate. The scoring argmax evaluates it for every candidate and only candidates it admits can win (`score` is evaluated for admitted candidates only); ties go to the lowest candidate id, so a verb whose `score` never reads `target` picks the lowest-id admitted target. A verb can therefore never fire for a target its `when` rejects, and there is no need to repeat the `when` checks inside `score`. (Candidates are all agent slots; a `from` spatial source restricts the mask's candidate walk but not yet the scoring walk, so range checks still belong in `when`.) Pinned by `crates/sims/tests/target_when_probe_pin.rs`.
+
 Adding a `verb` does not bump the schema hash. Adding a new micro primitive does (see §4).
 
 ### 2.8 `invariant` declaration

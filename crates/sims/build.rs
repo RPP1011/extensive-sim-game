@@ -165,6 +165,7 @@ fn main() {
                 | "contention_claim_probe"
                 | "contention_stock_probe"
                 | "event_flood_probe"
+                | "target_when_probe"
         ) {
             continue;
         }

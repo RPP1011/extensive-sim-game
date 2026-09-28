@@ -6142,12 +6142,13 @@ fn lower_op_body(
 /// before.
 ///
 /// The mask gate (when an action's name matches a registered mask) sits
-/// OUTSIDE the inner loop — it filters at the actor level. The
-/// per-pair predicate (the verb's `when` clause) is captured in the
-/// mask body's PerPair dispatch (`atomicOr` sets the agent bit when
-/// any candidate satisfies); the scoring kernel's inner loop simply
-/// iterates every candidate slot and lets the score expression
-/// determine winning candidates.
+/// OUTSIDE the inner loop — it filters at the actor level (the mask's
+/// PerPair body sets the agent bit when any candidate satisfies). For a
+/// target-bearing verb the row guard is the same per-pair predicate
+/// (see `cg::lower::driver::wire_scoring_pair_guards`), evaluated per
+/// candidate inside the loop, so a candidate the verb's `when` rejects
+/// can never win; such rows always run the candidate loop, even when
+/// neither the score nor the predicate reads `target`.
 ///
 /// Stride / sentinel constants are inlined (no module-scope `const`)
 /// so the fragment composes cleanly with sibling op bodies in a
@@ -6177,7 +6178,12 @@ fn lower_scoring_argmax_body(
         // candidate loop — every candidate slot contributes one
         // utility evaluation, and the argmax runs across (actor,
         // candidate) pairs. See the module-level doc above.
-        let row_is_per_pair = row_references_per_pair_candidate(row, ctx);
+        // A row gated by a PerPair (target-bearing) verb mask is always
+        // a pair row: its guard is the per-candidate `when` predicate
+        // (see `cg::lower::driver::wire_scoring_pair_guards`), and even
+        // a target-free score must still pick a real target.
+        let row_is_per_pair = row_references_per_pair_candidate(row, ctx)
+            || row_has_per_pair_mask(row, ctx);
 
         let utility_wgsl = lower_cg_expr_to_wgsl(row.utility, ctx)?;
         let target_wgsl = match row.target {
@@ -6210,12 +6216,12 @@ fn lower_scoring_argmax_body(
         // identifier (`cg::lower::driver::wire_scoring_mask_reads`).
         //
         // The mask gate sits OUTSIDE the inner candidate loop for
-        // pair-field rows — it filters at the actor level. (The
-        // per-pair `when` predicate is encoded in the mask's PerPair
-        // dispatch body, which sets the agent bit when any candidate
-        // satisfies; the scoring kernel does not re-check the
-        // per-pair predicate inside the inner loop in today's
-        // landing.)
+        // pair-field rows — it filters at the actor level (the mask's
+        // PerPair body sets the agent bit when ANY candidate
+        // satisfies). The per-candidate `when` re-check happens inside
+        // the loop through the row guard, which
+        // `cg::lower::driver::wire_scoring_pair_guards` sets to the
+        // mask predicate.
         let mask_gate_open = mask_for_action(row.action, ctx).map(|mask_id| {
             format!(
                 "    let mask_{0}_word_for_row_{i} = agent_id >> 5u;\n\
@@ -6367,7 +6373,23 @@ fn lower_scoring_argmax_body(
 
         match row.guard {
             Some(guard_id) => {
-                let guard_wgsl = lower_cg_expr_to_wgsl(guard_id, ctx)?;
+                // The guard may be a verb's `when` predicate (see
+                // `wire_scoring_pair_guards`), which can queue
+                // `let target_expr_<N>` pre-bindings (e.g.
+                // `items.base_price(0u)`); hoist them next to the guard,
+                // mirroring the mask kernel's own drain.
+                // The dedup set is program-wide (the mask kernel that
+                // lowered the same predicate already marked its target
+                // exprs bound), so lower the guard against an empty set
+                // and restore it afterwards — the hoisted lets are
+                // scoped to this row's block.
+                let saved_bound = ctx.bound_target_exprs.replace(Default::default());
+                let snapshot_len = ctx.pending_target_lets.borrow().len();
+                let guard_wgsl = lower_cg_expr_to_wgsl(guard_id, ctx);
+                let guard_lets: Vec<(crate::cg::CgExprId, String)> =
+                    ctx.pending_target_lets.borrow_mut().drain(snapshot_len..).collect();
+                ctx.bound_target_exprs.replace(saved_bound);
+                let guard_wgsl = guard_wgsl?;
                 writeln!(out, "// row {i}: action=#{} (guarded)", row.action.0).unwrap();
                 writeln!(out, "{{").unwrap();
                 if let Some(open) = &mask_gate_open {
@@ -6377,6 +6399,9 @@ fn lower_scoring_argmax_body(
                 out.push_str(&score_cand_bump);
                 if let Some(gate) = &predicate_gate {
                     out.push_str(gate);
+                }
+                for (id, w) in &guard_lets {
+                    writeln!(out, "    let target_expr_{}: u32 = {w};", id.0).unwrap();
                 }
                 writeln!(out, "    let guard_{i}: bool = {guard_wgsl};").unwrap();
                 let combined_guard = if predicate_gate.is_some() {
@@ -6642,6 +6667,18 @@ fn expr_references_per_pair_candidate(
 /// `MoveToward`, …) have no matching mask and fall through to
 /// `None`, leaving them ungated — same behaviour as before this
 /// change.
+/// True when `row`'s action is gated by a mask dispatched
+/// [`DispatchShape::PerPair`] — i.e. a verb with a `target` parameter.
+fn row_has_per_pair_mask(row: &ScoringRowOp, ctx: &EmitCtx<'_>) -> bool {
+    let Some(mask_id) = mask_for_action(row.action, ctx) else {
+        return false;
+    };
+    ctx.prog.ops.iter().any(|op| {
+        matches!(&op.kind, ComputeOpKind::MaskPredicate { mask, .. } if *mask == mask_id)
+            && matches!(op.shape, DispatchShape::PerPair { .. })
+    })
+}
+
 fn mask_for_action(
     action: crate::cg::op::ActionId,
     ctx: &EmitCtx<'_>,
