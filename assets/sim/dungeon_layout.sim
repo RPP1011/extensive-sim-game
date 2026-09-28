@@ -57,6 +57,7 @@
 //   - All 5 heroes alive at tick 30.
 //   - Heroes have explored ≥ 3 distinct rooms by tick 200.
 //   - Total enemy kills ≥ 10 by tick 400.
+//   - Party not wiped by tick 500.
 //   - Pin survives 500 ticks without panic / NaN / OOM.
 //
 // **Discriminant order** (decl-order alphabetical per commit 1c565df9):
@@ -197,7 +198,15 @@ config dungeon {
   brute_cleave_cd:      u32 = 8,
   brute_charge_range:   f32 = 10.0,
   archer_volley_range:  f32 = 18.0,
-  archer_volley_cd:     u32 = 6,
+  // RETUNED 6 -> 18 with the spatial-grid fix. ArcherVolley casts one
+  // `spread(5.0, 4)` Volley per hero in range, so against the clustered
+  // 5-hero party an archer lands ~5 overlapping volleys per cooldown.
+  // The old grid walk hid that: it ignored `nearby_los`'s declared
+  // 18-unit radius (archers saw heroes only ~6-12 units out) so they
+  // engaged late and few at a time. With the full 18-unit reach, cd 6
+  // wiped the party by tick ~50; cd 18 restores a contested crawl
+  // (measured: 18 kills by tick 400, 4/5 heroes alive at 500).
+  archer_volley_cd:     u32 = 18,
 
   // Role discriminants.
   role_warrior: u32 = 1,

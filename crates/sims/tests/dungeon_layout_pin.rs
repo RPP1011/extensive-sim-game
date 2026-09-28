@@ -31,6 +31,20 @@
 //!   2. Heroes have visited ≥ 3 distinct rooms by tick 200.
 //!   3. Total enemy kills ≥ 10 by tick 400.
 //!   4. No NaN/Inf in agent positions after 500 ticks.
+//!   5. The party is not wiped by tick 500 (≥ 1 hero alive).
+//!
+//! **Re-derived after the spatial-grid fix (fix/spatial-grid).** The
+//! spatial walks now honour each query's declared `@spatial(radius)`
+//! (archers and rangers reach their full 18 units instead of the ~6-12
+//! the fixed 27-cell walk gave them) and never re-visit a candidate. At
+//! the old `archer_volley_cd = 6` that wiped the party by tick ~50 (3
+//! kills, pin 2 failing): ArcherVolley casts one `spread(5.0, 4)` Volley
+//! per hero in range, so against the 5-hero cluster each archer lands ~5
+//! overlapping volleys per cooldown. `archer_volley_cd` is now 18 (see
+//! the config comment in dungeon_layout.sim). Measured with it (seed
+//! below): all 5 heroes alive at tick 30, ≥ 3 rooms visited by tick 200,
+//! 18 kills by tick 400, 4/5 heroes alive at tick 500 — the pre-fix run
+//! gave 17 kills and 3/5 alive.
 
 use sims::dungeon_layout::GeneratedRuntime;
 
@@ -235,7 +249,9 @@ fn dungeon_500_tick_clear_report() {
         let count = mask.count_ones();
         println!(
             "    hero[{h}] role={role_name} hp={:.1} rooms_visited={count} (mask=0b{mask:b})",
-            hps[h],
+            // Heroes occupy the LAST N_HEROES slots (see the seeding
+            // code); this used to print slots 0..5, i.e. enemies.
+            hps[agent_count as usize - N_HEROES as usize + h],
         );
     }
 
@@ -267,6 +283,12 @@ fn dungeon_500_tick_clear_report() {
 
     // Load-bearing pins.
     assert_eq!(nan_count, 0, "found {nan_count} NaN positions after {TICKS} ticks");
+    assert!(
+        final_alive_heroes >= 1,
+        "the party should not be wiped by tick {TICKS} (a wipe means the \
+         fixture's enemy damage has run away again — see the archer_volley_cd \
+         note in dungeon_layout.sim)"
+    );
 
     if let Some(alive_at_30) = tick_30_heroes_alive {
         // Stage 1 early-game safety: all 5 heroes alive at tick 30.
