@@ -821,7 +821,19 @@ pub fn kernel_topology_to_spec_and_body(
     // same WGSL declaration. Affects only the EventRing binding; the
     // BGL entry stays `bgl_storage(N, false)` (atomic vs non-atomic
     // is a WGSL-side distinction the BGL doesn't carry).
-    if is_per_event_emit {
+    //
+    // Exception — `@serial(...)` consumer kernels whose body never
+    // emits: nothing in them stores to the ring, and their group drain
+    // re-reads ring words many times from ONE thread, where atomic
+    // loads (which skip the L1 cache on most GPUs) are several times
+    // slower than plain loads. Such kernels keep the plain `array<u32>`
+    // declaration (the BGL entry is identical either way).
+    let serial_plain_ring = is_per_event_emit
+        && !body_ops.is_empty()
+        && body_ops.iter().all(|o| prog.serial_consumer(*o).is_some())
+        && !body_ops_have_emit(&body_ops, prog)
+        && !body_ops_have_apply_ability(&body_ops, prog);
+    if is_per_event_emit && !serial_plain_ring {
         for binding in bindings.iter_mut() {
             if binding.name == "event_ring"
                 && matches!(binding.access, AccessMode::ReadStorage | AccessMode::ReadWriteStorage)
@@ -966,7 +978,8 @@ pub fn kernel_topology_to_spec_and_body(
     // per-handler tag-filter wrap both pick the atomic form, then
     // restore on exit — defensive scoping in case the same `EmitCtx`
     // instance is reused across multiple kernels.
-    let prior_atomic_loads = ctx.event_ring_atomic_loads.replace(is_per_event_emit);
+    let prior_atomic_loads =
+        ctx.event_ring_atomic_loads.replace(is_per_event_emit && !serial_plain_ring);
     // Stash the alive-CAS flag for the duration of the body
     // emit so the per-stmt Assign arm + `lower_cg_stmt_list_to_wgsl`
     // wrap pick the atomicCAS shape; restore on exit so the same
@@ -4000,15 +4013,13 @@ fn per_event_op_kind_tag(
 /// module) — duplicated here rather than re-exported so the emit
 /// layer's helper stays a leaf with no upstream coupling.
 ///
-/// Currently unused: the `is_per_event_emit` gate now stamps
-/// PerEventEmit unconditionally for any PerEvent-dispatched kernel,
-/// since the PerEvent preamble references `cfg.event_count`
-/// regardless of whether the body emits (closing the trade_market_real
-/// + quest_arc_real + village_day_cycle Apply-only-PerEvent cfg-
-/// mismatch gaps). Kept as `#[allow(dead_code)]` because future kernel
-/// kinds may want to discriminate PerAgent rules with vs without Emit
-/// bodies for cfg-shape selection.
-#[allow(dead_code)]
+/// The `is_per_event_emit` gate stamps PerEventEmit unconditionally for
+/// any PerEvent-dispatched kernel, since the PerEvent preamble
+/// references `cfg.event_count` regardless of whether the body emits
+/// (closing the trade_market_real + quest_arc_real + village_day_cycle
+/// Apply-only-PerEvent cfg-mismatch gaps). Used by the `@serial`
+/// plain-ring exception (an emit-free serial kernel never stores to the
+/// ring, so it may read it with plain loads).
 fn body_ops_have_emit(body_ops: &[OpId], prog: &CgProgram) -> bool {
     for op_id in body_ops {
         let Ok(op) = resolve_op(prog, *op_id) else {
@@ -4026,6 +4037,33 @@ fn body_ops_have_emit(body_ops: &[OpId], prog: &CgProgram) -> bool {
         }
     }
     false
+}
+
+/// `true` when any body op's statement list reaches a
+/// [`crate::cg::stmt::CgStmt::ApplyAbility`] — the ability dispatcher
+/// appends chronicle records to the ring with `atomicStore`, so such a
+/// kernel must keep the atomic ring declaration.
+fn body_ops_have_apply_ability(body_ops: &[OpId], prog: &CgProgram) -> bool {
+    fn walk(list_id: crate::cg::stmt::CgStmtListId, prog: &CgProgram) -> bool {
+        use crate::cg::stmt::CgStmt;
+        let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
+            return false;
+        };
+        list.stmts.iter().any(|sid| match prog.stmts.get(sid.0 as usize) {
+            Some(CgStmt::ApplyAbility { .. }) => true,
+            Some(CgStmt::If { then, else_, .. }) => {
+                walk(*then, prog) || else_.as_ref().is_some_and(|e| walk(*e, prog))
+            }
+            Some(CgStmt::Match { arms, .. }) => arms.iter().any(|a| walk(a.body, prog)),
+            Some(CgStmt::ForEachNeighborBody { body, .. })
+            | Some(CgStmt::ForEachAgentBody { body, .. }) => walk(*body, prog),
+            _ => false,
+        })
+    }
+    body_ops.iter().any(|op_id| match resolve_op(prog, *op_id).map(|op| &op.kind) {
+        Ok(ComputeOpKind::PhysicsRule { body, .. }) => walk(*body, prog),
+        _ => false,
+    })
 }
 
 /// Walk every body op's statement list and return `true` if any
@@ -4078,6 +4116,260 @@ fn body_ops_collect_f32_atomic_writes(body_ops: &[OpId], prog: &CgProgram) -> u6
     bits
 }
 
+// ---------------------------------------------------------------------------
+// `@serial(...)` — deterministic grouped-serial chronicle consumers
+// ---------------------------------------------------------------------------
+
+/// Capacity of the per-thread sorted batch a `@serial` group leader
+/// fills per ring pass (see [`emit_serial_group_wrap`]). Groups larger
+/// than this are drained in several passes, each picking the next
+/// `SERIAL_BATCH` events after the last one applied.
+pub(crate) const SERIAL_BATCH: u32 = 64;
+
+/// One comparison column of the `@serial` total order: absolute record
+/// word, type mapping, direction.
+type SerialCol = (u32, crate::cg::program::SerialWordMap, bool);
+
+/// The full ordered column list of `spec`: the explicit `order`
+/// columns, then every remaining payload word ascending. (The ring slot
+/// index is the implicit last column.)
+fn serial_columns(spec: &crate::cg::program::SerialConsumerSpec) -> Vec<SerialCol> {
+    use crate::cg::program::SerialWordMap;
+    let mut cols: Vec<SerialCol> = spec.order.iter().map(|o| (o.word, o.map, o.desc)).collect();
+    for w in &spec.payload_words {
+        if !spec.order.iter().any(|o| o.word == *w) {
+            cols.push((*w, SerialWordMap::Unsigned, false));
+        }
+    }
+    cols
+}
+
+/// WGSL reading ring word `off` of record `idx`.
+fn serial_ring_word(atomic_loads: bool, stride: u32, idx: &str, off: u32) -> String {
+    if atomic_loads {
+        format!("atomicLoad(&event_ring[{idx} * {stride}u + {off}u])")
+    } else {
+        format!("event_ring[{idx} * {stride}u + {off}u]")
+    }
+}
+
+/// WGSL for column `col` of record `idx` mapped to an ASCENDING `u32`
+/// sort key: the type mapping makes unsigned order agree with the
+/// source type's order, and a descending column is bit-inverted.
+fn serial_key_expr(col: SerialCol, atomic_loads: bool, stride: u32, idx: &str) -> String {
+    use crate::cg::program::SerialWordMap;
+    let (off, map, desc) = col;
+    let v = serial_ring_word(atomic_loads, stride, idx, off);
+    let mapped = match map {
+        SerialWordMap::Unsigned => v,
+        SerialWordMap::Signed => format!("({v} ^ 0x80000000u)"),
+        SerialWordMap::Float => {
+            format!("select({v} ^ 0x80000000u, ~{v}, ({v} & 0x80000000u) != 0u)")
+        }
+    };
+    if desc {
+        format!("(~{mapped})")
+    } else {
+        mapped
+    }
+}
+
+/// Emit WGSL that sets the (already declared) bool var `out` to "record
+/// `a` sorts strictly before record `b`" under the `@serial` total
+/// order, given the two leading sort keys of each side already in
+/// registers (`a0`/`a1`, `b0`/`b1`). Only on a tie in both leading keys
+/// does it fall back to reading the remaining columns from the ring,
+/// then the ring slot index (reachable only for bit-identical
+/// payloads, whose relative order cannot change the outcome).
+#[allow(clippy::too_many_arguments)]
+fn serial_less_wgsl(
+    cols: &[SerialCol],
+    stride: u32,
+    atomic_loads: bool,
+    (a0, a1, a): (&str, &str, &str),
+    (b0, b1, b): (&str, &str, &str),
+    out: &str,
+    indent: &str,
+) -> String {
+    let mut s = String::new();
+    s.push_str(&format!(
+        "{indent}if ({a0} != {b0}) {{ {out} = {a0} < {b0}; }}\n\
+         {indent}else if ({a1} != {b1}) {{ {out} = {a1} < {b1}; }}\n\
+         {indent}else {{\n\
+         {indent}    {out} = {a} < {b};\n"
+    ));
+    // Columns 0 and 1 are the register keys; walk the rest.
+    let rest: Vec<SerialCol> = cols.iter().skip(2).copied().collect();
+    if !rest.is_empty() {
+        s.push_str(&format!("{indent}    var _sg_d: bool = false;\n"));
+        for col in rest {
+            s.push_str(&format!(
+                "{indent}    if (!_sg_d) {{\n\
+                 {indent}        let _sg_x: u32 = {x};\n\
+                 {indent}        let _sg_y: u32 = {y};\n\
+                 {indent}        if (_sg_x != _sg_y) {{ {out} = _sg_x < _sg_y; _sg_d = true; }}\n\
+                 {indent}    }}\n",
+                x = serial_key_expr(col, atomic_loads, stride, a),
+                y = serial_key_expr(col, atomic_loads, stride, b),
+            ));
+        }
+    }
+    s.push_str(&format!("{indent}}}\n"));
+    s
+}
+
+/// Wrap one `@serial` consumer op's lowered body (already indented
+/// for the op block) in the grouped-serial driver. Emitted INSIDE the
+/// op's event-kind tag guard, so `event_idx` is known to be an event
+/// of the consumed kind.
+///
+/// Shape (per event):
+///
+/// 1. **Election.** Scan the live ring for another event of the same
+///    kind and group key that sorts strictly before this one. If one
+///    exists this event is not the group leader and does nothing.
+///    Exactly one event per group (its first under the total order)
+///    becomes the leader — independent of ring slot assignment.
+/// 2. **Serial drain.** The leader repeatedly scans the ring for the
+///    next ≤ [`SERIAL_BATCH`] group members after the last one it
+///    applied, insertion-sorting them (two leading sort keys cached in
+///    registers) into a private array, then runs the ORIGINAL body once
+///    per member in order with `event_idx` shadowed to that member's
+///    ring slot — so every event-field read, pattern binder and emit in
+///    the body sees the member, exactly as if it had its own thread,
+///    but with every earlier member's writes already visible.
+///
+/// Cost: O(E) election scan per consumed event (early-exits on the
+/// first earlier member) plus O(E · ⌈k / SERIAL_BATCH⌉) for a group of
+/// k members, where E is this tick's live ring length. Groups run in
+/// parallel with each other; one group's drain is single-threaded.
+fn emit_serial_group_wrap(
+    spec: &crate::cg::program::SerialConsumerSpec,
+    kind_tag: u32,
+    stride: u32,
+    atomic_loads: bool,
+    body: &str,
+) -> String {
+    let cap = crate::cg::emit::wgsl_body::default_event_ring_cap_slots();
+    let batch = SERIAL_BATCH;
+    let cols = serial_columns(spec);
+    let word = |idx: &str, off: u32| serial_ring_word(atomic_loads, stride, idx, off);
+    let key_n = |idx: &str, n: usize| -> String {
+        match cols.get(n) {
+            Some(c) => serial_key_expr(*c, atomic_loads, stride, idx),
+            None => "0u".to_string(),
+        }
+    };
+    let less = |a: (&str, &str, &str), b: (&str, &str, &str), indent: &str| {
+        serial_less_wgsl(&cols, stride, atomic_loads, a, b, "_sg_lt", indent)
+    };
+    let key = spec.key_word;
+    let order_desc = spec
+        .order
+        .iter()
+        .map(|o| format!("{}{}", o.name, if o.desc { " desc" } else { "" }))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let member = |idx: &str| -> String {
+        format!("{} == {kind_tag}u && {} == _sg_key", word(idx, 0), word(idx, key))
+    };
+    let mut s = String::new();
+    s.push_str(&format!(
+        "// @serial(key = {kn}{ord}): deterministic grouped-serial apply.\n\
+         // Same-key events run one at a time, in payload order, on one thread.\n",
+        kn = spec.key_name,
+        ord = if order_desc.is_empty() {
+            String::new()
+        } else {
+            format!(", order = [{order_desc}]")
+        },
+    ));
+    s.push_str(&format!("let _sg_n: u32 = min(cfg.event_count, {cap}u);\n"));
+    s.push_str(&format!("let _sg_key: u32 = {};\n", word("event_idx", key)));
+    s.push_str(&format!("let _sg_me0: u32 = {};\n", key_n("event_idx", 0)));
+    s.push_str(&format!("let _sg_me1: u32 = {};\n", key_n("event_idx", 1)));
+    s.push_str("var _sg_lead: bool = true;\n");
+    s.push_str("var _sg_lt: bool = false;\n");
+    s.push_str("for (var _sg_j: u32 = 0u; _sg_j < _sg_n; _sg_j = _sg_j + 1u) {\n");
+    s.push_str(&format!("    if (_sg_j != event_idx && {}) {{\n", member("_sg_j")));
+    s.push_str(&format!("        let _sg_j0: u32 = {};\n", key_n("_sg_j", 0)));
+    s.push_str(&format!("        let _sg_j1: u32 = {};\n", key_n("_sg_j", 1)));
+    s.push_str(&less(("_sg_j0", "_sg_j1", "_sg_j"), ("_sg_me0", "_sg_me1", "event_idx"), "        "));
+    s.push_str("        if (_sg_lt) { _sg_lead = false; break; }\n");
+    s.push_str("    }\n");
+    s.push_str("}\n");
+    s.push_str("if (_sg_lead) {\n");
+    s.push_str(&format!("    var _sg_buf: array<u32, {batch}>;\n"));
+    s.push_str(&format!("    var _sg_b0: array<u32, {batch}>;\n"));
+    s.push_str(&format!("    var _sg_b1: array<u32, {batch}>;\n"));
+    s.push_str("    var _sg_have_cur: bool = false;\n");
+    s.push_str("    var _sg_cur: u32 = 0u;\n");
+    s.push_str("    var _sg_c0: u32 = 0u;\n");
+    s.push_str("    var _sg_c1: u32 = 0u;\n");
+    s.push_str("    loop {\n");
+    s.push_str("        var _sg_cnt: u32 = 0u;\n");
+    s.push_str("        for (var _sg_j: u32 = 0u; _sg_j < _sg_n; _sg_j = _sg_j + 1u) {\n");
+    s.push_str(&format!("            if (!({})) {{ continue; }}\n", member("_sg_j")));
+    s.push_str(&format!("            let _sg_j0: u32 = {};\n", key_n("_sg_j", 0)));
+    s.push_str(&format!("            let _sg_j1: u32 = {};\n", key_n("_sg_j", 1)));
+    s.push_str("            if (_sg_have_cur) {\n");
+    s.push_str(&less(("_sg_c0", "_sg_c1", "_sg_cur"), ("_sg_j0", "_sg_j1", "_sg_j"), "                "));
+    s.push_str("                if (!_sg_lt) { continue; }\n");
+    s.push_str("            }\n");
+    s.push_str(&format!("            if (_sg_cnt == {batch}u) {{\n"));
+    s.push_str(&format!(
+        "                let _sg_l: u32 = _sg_buf[{last}u];\n\
+         \x20               let _sg_l0: u32 = _sg_b0[{last}u];\n\
+         \x20               let _sg_l1: u32 = _sg_b1[{last}u];\n",
+        last = batch - 1
+    ));
+    s.push_str(&less(("_sg_j0", "_sg_j1", "_sg_j"), ("_sg_l0", "_sg_l1", "_sg_l"), "                "));
+    s.push_str("                if (!_sg_lt) { continue; }\n");
+    s.push_str("            }\n");
+    s.push_str(&format!("            var _sg_i: u32 = min(_sg_cnt, {}u);\n", batch - 1));
+    s.push_str(&format!("            if (_sg_cnt < {batch}u) {{ _sg_cnt = _sg_cnt + 1u; }}\n"));
+    s.push_str("            loop {\n");
+    s.push_str("                if (_sg_i == 0u) { break; }\n");
+    s.push_str("                let _sg_p: u32 = _sg_buf[_sg_i - 1u];\n");
+    s.push_str("                let _sg_p0: u32 = _sg_b0[_sg_i - 1u];\n");
+    s.push_str("                let _sg_p1: u32 = _sg_b1[_sg_i - 1u];\n");
+    s.push_str(&less(("_sg_j0", "_sg_j1", "_sg_j"), ("_sg_p0", "_sg_p1", "_sg_p"), "                "));
+    s.push_str("                if (!_sg_lt) { break; }\n");
+    s.push_str("                _sg_buf[_sg_i] = _sg_p;\n");
+    s.push_str("                _sg_b0[_sg_i] = _sg_p0;\n");
+    s.push_str("                _sg_b1[_sg_i] = _sg_p1;\n");
+    s.push_str("                _sg_i = _sg_i - 1u;\n");
+    s.push_str("            }\n");
+    s.push_str("            _sg_buf[_sg_i] = _sg_j;\n");
+    s.push_str("            _sg_b0[_sg_i] = _sg_j0;\n");
+    s.push_str("            _sg_b1[_sg_i] = _sg_j1;\n");
+    s.push_str("        }\n");
+    s.push_str("        if (_sg_cnt == 0u) { break; }\n");
+    s.push_str("        for (var _sg_q: u32 = 0u; _sg_q < _sg_cnt; _sg_q = _sg_q + 1u) {\n");
+    s.push_str("            // Shadow `event_idx`: the body below runs for group member _sg_q.\n");
+    s.push_str("            let event_idx: u32 = _sg_buf[_sg_q];\n");
+    s.push_str("            {\n");
+    for line in body.lines() {
+        if line.is_empty() {
+            s.push('\n');
+        } else {
+            s.push_str("            ");
+            s.push_str(line);
+            s.push('\n');
+        }
+    }
+    s.push_str("            }\n");
+    s.push_str("        }\n");
+    s.push_str("        _sg_cur = _sg_buf[_sg_cnt - 1u];\n");
+    s.push_str("        _sg_c0 = _sg_b0[_sg_cnt - 1u];\n");
+    s.push_str("        _sg_c1 = _sg_b1[_sg_cnt - 1u];\n");
+    s.push_str("        _sg_have_cur = true;\n");
+    s.push_str(&format!("        if (_sg_cnt < {batch}u) {{ break; }}\n"));
+    s.push_str("    }\n");
+    s.push_str("}");
+    s
+}
+
 /// Walk every body op's statement list and union the set of u32/bool
 /// [`crate::cg::data_handle::AgentFieldId`]s exhibiting the claim-CAS
 /// check-then-set exclusivity hazard — see
@@ -4094,6 +4386,14 @@ fn body_ops_collect_u32_claim_cas_fields(
         let Ok(op) = resolve_op(prog, *op_id) else {
             continue;
         };
+        // `@serial` consumers apply each contended group on ONE thread
+        // in a deterministic order, so a check-then-set inside them is
+        // already exclusive — no CAS promotion (which would also make
+        // the winner scheduling-dependent again, and cannot express an
+        // `else` branch for the losers).
+        if prog.serial_consumer(op.id).is_some() {
+            continue;
+        }
         let body_list = match &op.kind {
             ComputeOpKind::PhysicsRule { body, .. } => Some(*body),
             ComputeOpKind::ViewFold { body, .. } => Some(*body),
@@ -5192,6 +5492,20 @@ fn build_wgsl_body(
         } else {
             None
         };
+        // `@serial(...)` consumers: wrap the body in the deterministic
+        // grouped-serial driver (election + ordered drain). The wrap
+        // sits INSIDE the tag guard below, so it only ever runs for an
+        // event of the consumed kind.
+        let fragment = match (fold_meta, prog.serial_consumer(op.id)) {
+            (Some((kind_tag, stride)), Some(spec)) => emit_serial_group_wrap(
+                spec,
+                kind_tag,
+                stride,
+                ctx.event_ring_atomic_loads.get(),
+                &fragment,
+            ),
+            _ => fragment,
+        };
         // Wrap the per-op body in `{ ... }` so locals declared by Task 1's
         // event-pattern binding lowering (`let local_<N>: <ty> = ...;`)
         // live in their own WGSL scope. Without these braces, two ops in
@@ -5879,12 +6193,13 @@ fn lower_op_body(
 /// before.
 ///
 /// The mask gate (when an action's name matches a registered mask) sits
-/// OUTSIDE the inner loop — it filters at the actor level. The
-/// per-pair predicate (the verb's `when` clause) is captured in the
-/// mask body's PerPair dispatch (`atomicOr` sets the agent bit when
-/// any candidate satisfies); the scoring kernel's inner loop simply
-/// iterates every candidate slot and lets the score expression
-/// determine winning candidates.
+/// OUTSIDE the inner loop — it filters at the actor level (the mask's
+/// PerPair body sets the agent bit when any candidate satisfies). For a
+/// target-bearing verb the row guard is the same per-pair predicate
+/// (see `cg::lower::driver::wire_scoring_pair_guards`), evaluated per
+/// candidate inside the loop, so a candidate the verb's `when` rejects
+/// can never win; such rows always run the candidate loop, even when
+/// neither the score nor the predicate reads `target`.
 ///
 /// Stride / sentinel constants are inlined (no module-scope `const`)
 /// so the fragment composes cleanly with sibling op bodies in a
@@ -5914,7 +6229,12 @@ fn lower_scoring_argmax_body(
         // candidate loop — every candidate slot contributes one
         // utility evaluation, and the argmax runs across (actor,
         // candidate) pairs. See the module-level doc above.
-        let row_is_per_pair = row_references_per_pair_candidate(row, ctx);
+        // A row gated by a PerPair (target-bearing) verb mask is always
+        // a pair row: its guard is the per-candidate `when` predicate
+        // (see `cg::lower::driver::wire_scoring_pair_guards`), and even
+        // a target-free score must still pick a real target.
+        let row_is_per_pair = row_references_per_pair_candidate(row, ctx)
+            || row_has_per_pair_mask(row, ctx);
 
         let utility_wgsl = lower_cg_expr_to_wgsl(row.utility, ctx)?;
         let target_wgsl = match row.target {
@@ -5947,12 +6267,12 @@ fn lower_scoring_argmax_body(
         // identifier (`cg::lower::driver::wire_scoring_mask_reads`).
         //
         // The mask gate sits OUTSIDE the inner candidate loop for
-        // pair-field rows — it filters at the actor level. (The
-        // per-pair `when` predicate is encoded in the mask's PerPair
-        // dispatch body, which sets the agent bit when any candidate
-        // satisfies; the scoring kernel does not re-check the
-        // per-pair predicate inside the inner loop in today's
-        // landing.)
+        // pair-field rows — it filters at the actor level (the mask's
+        // PerPair body sets the agent bit when ANY candidate
+        // satisfies). The per-candidate `when` re-check happens inside
+        // the loop through the row guard, which
+        // `cg::lower::driver::wire_scoring_pair_guards` sets to the
+        // mask predicate.
         let mask_gate_open = mask_for_action(row.action, ctx).map(|mask_id| {
             format!(
                 "    let mask_{0}_word_for_row_{i} = agent_id >> 5u;\n\
@@ -6104,7 +6424,23 @@ fn lower_scoring_argmax_body(
 
         match row.guard {
             Some(guard_id) => {
-                let guard_wgsl = lower_cg_expr_to_wgsl(guard_id, ctx)?;
+                // The guard may be a verb's `when` predicate (see
+                // `wire_scoring_pair_guards`), which can queue
+                // `let target_expr_<N>` pre-bindings (e.g.
+                // `items.base_price(0u)`); hoist them next to the guard,
+                // mirroring the mask kernel's own drain.
+                // The dedup set is program-wide (the mask kernel that
+                // lowered the same predicate already marked its target
+                // exprs bound), so lower the guard against an empty set
+                // and restore it afterwards — the hoisted lets are
+                // scoped to this row's block.
+                let saved_bound = ctx.bound_target_exprs.replace(Default::default());
+                let snapshot_len = ctx.pending_target_lets.borrow().len();
+                let guard_wgsl = lower_cg_expr_to_wgsl(guard_id, ctx);
+                let guard_lets: Vec<(crate::cg::CgExprId, String)> =
+                    ctx.pending_target_lets.borrow_mut().drain(snapshot_len..).collect();
+                ctx.bound_target_exprs.replace(saved_bound);
+                let guard_wgsl = guard_wgsl?;
                 writeln!(out, "// row {i}: action=#{} (guarded)", row.action.0).unwrap();
                 writeln!(out, "{{").unwrap();
                 if let Some(open) = &mask_gate_open {
@@ -6114,6 +6450,9 @@ fn lower_scoring_argmax_body(
                 out.push_str(&score_cand_bump);
                 if let Some(gate) = &predicate_gate {
                     out.push_str(gate);
+                }
+                for (id, w) in &guard_lets {
+                    writeln!(out, "    let target_expr_{}: u32 = {w};", id.0).unwrap();
                 }
                 writeln!(out, "    let guard_{i}: bool = {guard_wgsl};").unwrap();
                 let combined_guard = if predicate_gate.is_some() {
@@ -6379,6 +6718,18 @@ fn expr_references_per_pair_candidate(
 /// `MoveToward`, …) have no matching mask and fall through to
 /// `None`, leaving them ungated — same behaviour as before this
 /// change.
+/// True when `row`'s action is gated by a mask dispatched
+/// [`DispatchShape::PerPair`] — i.e. a verb with a `target` parameter.
+fn row_has_per_pair_mask(row: &ScoringRowOp, ctx: &EmitCtx<'_>) -> bool {
+    let Some(mask_id) = mask_for_action(row.action, ctx) else {
+        return false;
+    };
+    ctx.prog.ops.iter().any(|op| {
+        matches!(&op.kind, ComputeOpKind::MaskPredicate { mask, .. } if *mask == mask_id)
+            && matches!(op.shape, DispatchShape::PerPair { .. })
+    })
+}
+
 fn mask_for_action(
     action: crate::cg::op::ActionId,
     ctx: &EmitCtx<'_>,

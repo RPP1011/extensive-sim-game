@@ -173,6 +173,10 @@ fn main() {
                 // `for x in spatial.q(self) { emit }` end to end
                 // (crates/sims/tests/spatial_emit_probe_pin.rs).
                 | "spatial_emit_probe"
+                | "contention_claim_probe"
+                | "contention_stock_probe"
+                | "event_flood_probe"
+                | "target_when_probe"
         ) {
             continue;
         }

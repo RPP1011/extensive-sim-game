@@ -724,6 +724,16 @@ pub fn lower_compilation_to_cg_with_opts(
     // observable effect on argmax.
     wire_scoring_mask_reads(&arena_snapshot, ctx.builder.ops_mut());
 
+    // -- Phase 4c'': per-target `when` filtering in scoring -------------
+    //
+    // A target-bearing verb's mask is a PerPair predicate over (actor,
+    // candidate), but the mask kernel only records "SOME candidate
+    // passed" in a per-actor bit. Re-apply the predicate per candidate
+    // inside the scoring argmax (as the row guard) so a verb can never
+    // be chosen for a target its `when` rejects. See
+    // `wire_scoring_pair_guards`.
+    wire_scoring_pair_guards(&mut ctx);
+
     // -- Phase 4c': ScoringArgmax predicate-eval bindings ---------------
     //
     // Predicate-aware scoring (Wave 1.5#7 follow-on). When the program
@@ -4035,6 +4045,84 @@ fn wire_scoring_mask_reads(prog: &CgProgram, ops: &mut [ComputeOp]) {
             }
             for mask_id in to_record {
                 op.record_read(DataHandle::MaskBitmap { mask: mask_id });
+            }
+        }
+    }
+}
+
+/// Per-target `when` filtering for target-bearing verb rows.
+///
+/// For every [`ComputeOpKind::ScoringArgmax`] row whose action has a
+/// [`ComputeOpKind::MaskPredicate`] dispatched [`DispatchShape::PerPair`]
+/// (a verb with a `target: Agent` parameter), set the row's guard to the
+/// mask predicate — AND-ed with any guard the row already carries — and
+/// copy the mask op's reads onto the scoring op so the kernel binds
+/// every field the predicate touches.
+///
+/// The predicate expression is shared verbatim: the mask kernel and the
+/// scoring candidate loop both bind the actor as `agent_id` and the
+/// candidate as `per_pair_candidate`, so the same `CgExprId` lowers to
+/// the same WGSL in both. The scoring emitter additionally treats any
+/// row with a PerPair mask as a pair row (runs the candidate loop) even
+/// when neither the score nor the predicate reads `target`, so such a
+/// verb still gets a real target (the lowest-id passing candidate on
+/// ties) instead of `NO_TARGET`.
+fn wire_scoring_pair_guards(ctx: &mut LoweringCtx<'_>) {
+    use crate::cg::expr::{BinaryOp, CgExpr};
+    let prog = ctx.builder.program();
+    // mask name -> (predicate, reads) for PerPair masks only.
+    let mut pair_masks: std::collections::HashMap<String, (crate::cg::data_handle::CgExprId, Vec<DataHandle>)> =
+        std::collections::HashMap::new();
+    for op in &prog.ops {
+        if let ComputeOpKind::MaskPredicate { mask, predicate } = &op.kind {
+            if !matches!(op.shape, DispatchShape::PerPair { .. }) {
+                continue;
+            }
+            if let Some(name) = prog.interner.masks.get(&mask.0) {
+                pair_masks.insert(name.clone(), (*predicate, op.reads.clone()));
+            }
+        }
+    }
+    if pair_masks.is_empty() {
+        return;
+    }
+    // (op index, row index, predicate, existing guard, mask reads)
+    let mut plan = Vec::new();
+    for (oi, op) in prog.ops.iter().enumerate() {
+        let ComputeOpKind::ScoringArgmax { rows, .. } = &op.kind else {
+            continue;
+        };
+        for (ri, row) in rows.iter().enumerate() {
+            let Some(name) = prog.interner.get_action_name(row.action) else {
+                continue;
+            };
+            let Some((pred, reads)) = pair_masks.get(name) else {
+                continue;
+            };
+            plan.push((oi, ri, *pred, row.guard, reads.clone()));
+        }
+    }
+    for (oi, ri, pred, existing, reads) in plan {
+        let guard = match existing {
+            None => pred,
+            Some(g) if g == pred => pred,
+            Some(g) => match ctx.builder.add_expr(CgExpr::Binary {
+                op: BinaryOp::And,
+                lhs: g,
+                rhs: pred,
+                ty: CgTy::Bool,
+            }) {
+                Ok(id) => id,
+                Err(_) => continue,
+            },
+        };
+        let op = &mut ctx.builder.ops_mut()[oi];
+        if let ComputeOpKind::ScoringArgmax { rows, .. } = &mut op.kind {
+            rows[ri].guard = Some(guard);
+        }
+        for r in reads {
+            if !op.reads.contains(&r) {
+                op.record_read(r);
             }
         }
     }

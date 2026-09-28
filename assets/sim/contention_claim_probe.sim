@@ -1,0 +1,94 @@
+// contention_claim_probe — EXCLUSIVE RESERVATION under heavy same-tick
+// contention, resolved deterministically by `@serial(...)`.
+//
+// Every tick EVERY claimant (slot >= config.cp.targets) claims one of
+// the `targets` target slots (slots 0..targets-1): ~1000 claimants on
+// 10 targets means ~100 same-tick claims per target, every tick, with
+// no phase-slot staggering. The target choice rotates with the tick
+// (the score has a unique argmax per claimant per tick) and so does
+// each claim's priority.
+//
+// `ApplyClaim` is `@serial(key = t, order = [p, w], desc = [p])`: all
+// same-tick ClaimReq events on one target are applied one at a time,
+// highest priority first, ties by lowest claimant id — so the FIRST
+// applied claim wins (sees the target unclaimed this tick) and every
+// later one takes the `else` branch (a loser that can tell it lost).
+// Claims are per-tick (claim_tick stamps the tick + 1), so the whole
+// contest re-runs every tick: maximal contention, no release rules.
+//
+// `ApplyClaimUnordered` is the CONTROL: the identical body without
+// `@serial`, i.e. the engine's default parallel apply with stale reads,
+// writing a mirrored set of `_u` fields. Its result depends on GPU
+// scheduling (several "winners" per target, lost increments). The pin
+// test (`crates/sims/tests/contention_probe_pin.rs`) asserts the serial
+// fields equal a host-side serial reference bit-for-bit, across
+// repeated runs and across processes; the control is only reported.
+
+// Per-kernel GPU timings (read only when SIM_KERNEL_TIMINGS=1 at run
+// time; instrumentation never changes what the sim computes).
+debug {
+  depth: kernel,
+}
+
+event Tick { }
+
+@replayable @gpu_amenable
+event ClaimReq { who: AgentId, what: AgentId, prio: u32 }
+
+entity Worker : Agent { }
+
+config cp {
+  targets: u32 = 10,
+}
+
+field idx:          u32   // == slot (seeded below)
+// target side (serial)
+field claim_tick:   u32   // world.tick + 1 of the tick this target was last won
+field claimed_by:   u32   // idx of the most recent winner
+// claimant side (serial)
+field wins:         u32
+field losses:       u32
+field last_win:     u32   // idx + 1 of the target most recently won
+// control mirror (unordered parallel apply)
+field claim_tick_u: u32
+field claimed_by_u: u32
+field wins_u:       u32
+field losses_u:     u32
+
+init {
+  alive: 1,
+  idx: slot,
+}
+
+verb Claim(self, target: Agent) =
+  action ClaimAction
+  when (self.idx >= config.cp.targets && target.idx < config.cp.targets)
+  emit ClaimReq { who: self, what: target, prio: (self.idx * 7u + world.tick) % 13u }
+  score f32((self.idx + target.idx + world.tick) % config.cp.targets)
+
+@phase(post) @serial(key = t, order = [p, w], desc = [p])
+physics ApplyClaim {
+  on ClaimReq { who: w, what: t, prio: p } {
+    if (agents.claim_tick(t) != world.tick + 1u) {
+      agents.set_claim_tick(t, world.tick + 1u);
+      agents.set_claimed_by(t, agents.idx(w));
+      agents.set_wins(w, agents.wins(w) + 1u);
+      agents.set_last_win(w, agents.idx(t) + 1u);
+    } else {
+      agents.set_losses(w, agents.losses(w) + 1u);
+    }
+  }
+}
+
+@phase(post)
+physics ApplyClaimUnordered {
+  on ClaimReq { who: w, what: t, prio: p } {
+    if (agents.claim_tick_u(t) != world.tick + 1u) {
+      agents.set_claim_tick_u(t, world.tick + 1u);
+      agents.set_claimed_by_u(t, agents.idx(w));
+      agents.set_wins_u(w, agents.wins_u(w) + 1u);
+    } else {
+      agents.set_losses_u(w, agents.losses_u(w) + 1u);
+    }
+  }
+}

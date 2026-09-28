@@ -271,6 +271,7 @@ Annotations:
 - `@cpu_only` — the rule is dispatched only on the host (scalar Rust) backend; the GPU lowering skips it entirely. Used for handlers whose bodies touch host-only surfaces (chronicle `String` payloads, dev-time logging) — example: `assets/sim/predator_prey_min.sim::ChronicleDeath`. Verified: `crates/dsl_compiler/src/cg/lower/driver.rs::lower_all_physics` (`if rule.cpu_only { continue; }`).
 - `@before(OtherRule)` / `@after(OtherRule)` — explicit ordering between rules in the same phase (parser accepted; enforcement pending — see audit callout above).
 - `@terminating_in(N)` — asserts the cascade converges within N hops when self-emission is possible.
+- `@serial(key = <name>, order = [<name>, …], desc = [<name>, …])` — **deterministic contention resolution** for a per-event (`@phase(post)` / `@phase(event)`) chronicle consumer. See §2.4.1.
 
 Compile-time validation (implemented):
 1. Event-type existence on every `on` pattern.
@@ -278,6 +279,59 @@ Compile-time validation (implemented):
 3. Cycle detection in the event-type emission DAG; self-loops require `@terminating_in`.
 4. Schema-hash drift on event or field references.
 5. All referenced views, events, and fields resolve.
+
+#### 2.4.1 Deterministic contention: `@serial(...)`
+
+**The problem.** A per-event consumer runs one GPU thread per event, all in parallel, reading state as it was before any of them wrote. Two same-tick events that touch the same state therefore resolve by GPU scheduling: two claims on one target can both see it unclaimed (the built-in claim-CAS promotion prevents the double win but the *winner* is still whichever thread got there first), two decrements of one stock lose an update, and an f32 sum depends on arrival order. The result differs run to run. Fixtures used to work around this by giving every contended verb a unique per-agent tick residue (`world.tick % N == (self.stagger + k) % N`), which caps contention at one agent per tick and adds up to N ticks of latency.
+
+**The annotation.** `@serial` makes a consumer apply same-tick events **one at a time, in a deterministic order, grouped by the entity they contend on**:
+
+```
+@phase(post) @serial(key = t, order = [p, w], desc = [p])
+physics ApplyClaim {
+  on ClaimReq { who: w, what: t, prio: p } {
+    if (agents.claim_tick(t) != world.tick + 1u) {   // first applied claim this tick wins
+      agents.set_claim_tick(t, world.tick + 1u);
+      agents.set_claimed_by(t, agents.idx(w));
+      agents.set_wins(w, agents.wins(w) + 1u);
+    } else {                                          // every later claim on t lost
+      agents.set_losses(w, agents.losses(w) + 1u);
+    }
+  }
+}
+```
+
+- `key` (required; also accepted positionally, `@serial(t)`) — the **group key**: the event field every contending event shares, usually the contended entity. Events of this handler's kind with equal key form one group.
+- `order` (optional) — the **application order** inside a group: lexicographic over the listed fields, ascending unless the field is also listed in `desc`.
+- `desc` (optional) — fields of `order` to sort descending (larger value applied first). Every `desc` name must also appear in `order`.
+
+Names may be the handler's pattern binders (`t`, `p`, `w` above) or the event's own field names (`what`, `prio`, `who`). Key and ordering fields must be one-word scalars (`AgentId`, `u32`, `i32`, `bool`, `f32`, `Tick`); `i32` and `f32` compare by value (`f32` uses the IEEE total order). Malformed annotations — no key, an unknown name, a `vec3` column, a `desc` name missing from `order`, an unknown argument, or `@serial` on a `@phase(per_agent)` rule — are `LoweringError::InvalidSerialAnnotation` diagnostics.
+
+**Semantics (the contract).**
+
+1. *Grouping.* All events of the consumed kind emitted so far this tick (the whole live ring at dispatch time) are partitioned by key. Groups run in parallel with each other.
+2. *Order within a group* is a total order that depends only on event payloads, never on ring position or GPU scheduling: the `order` columns, then every payload word in declaration order (raw `u32`, ascending), then — only for events whose payloads are bit-identical, whose relative order cannot change the outcome — the ring slot. With `order = [p, w], desc = [p]` a group is applied highest priority first, ties by lowest `w` (agent ids are slot indices).
+3. *Serial application.* The group's events are applied by one thread, exactly as if each ran the body alone, in that order, and **every event observes the writes of all events before it in its group** (same-tick visibility). A check-then-set therefore admits exactly one winner — the first event in order — and the rest take the `else` branch.
+4. *Losers observe losing* through that same mechanism: whatever the body does when its guard fails runs for every losing event, in the same tick (count a loss, stamp `lost_tick`, clear an intent field). An agent whose claim lost still has its claim field unset afterwards, so its verb can simply fire again next tick — no phase slot needed.
+5. *Accumulation.* Read-modify-write on the key entity (`set_stock(t, stock(t) - 1u)`, `set_ledger(t, ledger(t) + s)`, `hp -= dmg`) sees every earlier contribution, so nothing is lost; because the order is fixed, even f32 sums are bit-identical run to run and across processes. A guarded decrement (`if (stock(t) >= 1u) { … } else { … }`) hands the last units to the first events in order.
+6. *No CAS promotion.* The claim-CAS rewrite applied to un-annotated consumers (which picks a scheduling-dependent winner and cannot express an `else`) is not applied to `@serial` consumers; their `if/else` bodies lower verbatim.
+7. *Kernel isolation.* A `@serial` consumer is never fused with a sibling op. Like every per-event kernel it sees the whole live ring (see §6.2).
+
+**Rules the body must follow for the result to be deterministic.**
+
+- Writes to the **key entity** are always safe.
+- Writes to any **other** entity (typically the emitter, `w`) are safe when that entity appears in at most one group per tick for this consumer — e.g. each agent emits at most one such event per tick, which is what verbs do (one action per agent per tick). If one agent emits two events with different keys into the same `@serial` consumer in one tick, both groups may write it concurrently.
+- Reads of other entities see state as of the dispatch, except entities written by other groups (same caveat).
+- Events emitted from the body are ordinary same-tick events (their ring slots are scheduling-dependent, as for any emit); a downstream consumer that must be deterministic in their order should itself be `@serial`.
+
+**Cost.** Each event scans the live ring once to find whether it is its group's first (early exit on the first earlier member); the group's first event then drains the group, gathering the next 64 members per ring pass into a private sorted batch. That is O(E) per event plus O(E·⌈k/64⌉) sequential work per group of k events, E = live ring length this tick; groups proceed in parallel. Measured on the heavy-contention pins at 1024 agents (E ≈ 2 000): 1014 claimants on 10 targets (≈100 per group) ≈ 1.1 ms of GPU time per tick for the serial kernel; 1023 eaters on one holder (a single 1023-event group) ≈ 10 ms per tick; the un-annotated parallel kernel is ≈ 7 µs. Small groups (a handful of claims per target, dozens of eaters per store) cost far less. Prefer a narrow key and keep huge single-key groups rare.
+
+**Limitations.**
+
+- The winner rule is expressed through `order`; there is no per-group "top K" primitive beyond writing the guard in the body.
+- One huge group is single-threaded (see *Cost*).
+
+Pinned by `crates/sims/tests/contention_probe_pin.rs` (fixtures `assets/sim/contention_claim_probe.sim`, `assets/sim/contention_stock_probe.sim`: GPU state equals a host serial reference bit-for-bit, identical across repeated runs and across processes, under ~1000-way contention every tick) and `crates/dsl_compiler/tests/serial_consumer_emit.rs` (lowering, emitted driver, fusion isolation, naga validation, diagnostics).
 
 ### 2.5 `mask` predicates
 
@@ -352,6 +406,8 @@ verb Pray(self, shrine: Structure) =
 ```
 
 The compiler expands a `verb` into: (1) a mask entry narrowing an existing primitive, (2) a cascade handler that emits the declared event on successful action application, (3) a scoring entry appended to the scoring table.
+
+**Target selection.** For a verb with a `target: Agent` parameter the `when` clause is a per-(actor, candidate) predicate. The scoring argmax evaluates it for every candidate and only candidates it admits can win (`score` is evaluated for admitted candidates only); ties go to the lowest candidate id, so a verb whose `score` never reads `target` picks the lowest-id admitted target. A verb can therefore never fire for a target its `when` rejects, and there is no need to repeat the `when` checks inside `score`. (Candidates are all agent slots; a `from` spatial source restricts the mask's candidate walk but not yet the scoring walk, so range checks still belong in `when`.) Pinned by `crates/sims/tests/target_when_probe_pin.rs`.
 
 Adding a `verb` does not bump the schema hash. Adding a new micro primitive does (see §4).
 
@@ -826,6 +882,8 @@ Runtime constants: `MAX_ANNOUNCE_RECIPIENTS` (default 64); `OVERHEAR_RANGE_FRACT
 - All randomness flows through `rng_state: u64` (PCG-style) plus per-agent derived streams. Per-agent RNG seeded from `hash(world_seed, agent_id, tick, purpose_tag)`.
 - Agent processing order is deterministically shuffled each tick via an RNG-seeded permutation.
 - Events emitted within a phase are collected in append order; handlers process them deterministically.
+- **GPU caveat (per-event consumers):** on the compiled GPU path, ring append order is decided by `atomicAdd` and per-event consumers apply same-tick events in parallel against pre-dispatch state, so two same-tick events touching the same state resolve by scheduling. Consumers that contend on shared state must be annotated `@serial(...)` (§2.4.1) to get a scheduling-independent, bit-reproducible result.
+- **Every live event is consumed exactly once.** Per-event kernels (chronicle consumers, `@serial` consumers, CAS and ring-append view folds) are dispatched with an agent-sized thread count, so each thread walks the live ring with a grid stride (`for (i = gid; i < min(event_count, ring_cap); i += total_threads)`); a tick may hold any number of events up to the ring capacity, independent of the agent count. Pinned by `crates/sims/tests/event_flood_probe_pin.rs` (4 events per agent per tick).
 - Text generation (`ChronicleEntry.text`, LLM prose) is `@non_replayable` (§9 #21): templates render eagerly at event emission; an async LLM pass may rewrite entries in flagged categories.
 
 ### 6.3 Replay scope

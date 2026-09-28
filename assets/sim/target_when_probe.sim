@@ -1,0 +1,55 @@
+// target_when_probe — regression fixture: scoring must honour a verb's
+// target-dependent `when` per CANDIDATE, not just per actor.
+//
+// The verb mask is a per-(actor, candidate) predicate, but the mask
+// kernel only records "some candidate passed" in a per-actor bit. The
+// scoring argmax used to walk every candidate without re-checking
+// `when`, so it could pick a target the verb rejects; and a score that
+// never reads `target` skipped the candidate walk entirely and emitted
+// NO_TARGET. Both are pinned here (agent_count = 16):
+//
+// * `PickEven` (actors 0..7): `when` admits only even-idx targets other
+//   than self, but the score prefers the HIGHEST idx — slot 15 (odd,
+//   rejected). Correct pick: 14 (or 12 for actor 14 itself).
+// * `PickAny` (actors 8..15): `when` admits targets with idx % 3 == 1
+//   other than self, and the score is a constant. Correct pick: the
+//   lowest passing slot, 1 (ties go to the lowest candidate id).
+//
+// The consumer records `picked = idx(target) + 1` and `verb_id`.
+// Pinned by `crates/sims/tests/target_when_probe_pin.rs`.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Picked { who: AgentId, what: AgentId, verb_id: u32 }
+
+entity Chooser : Agent { }
+
+field idx:     u32
+field picked:  u32
+field verb_id: u32
+
+init {
+  alive: 1,
+  idx: slot,
+}
+
+verb PickEven(self, target: Agent) =
+  action PickEvenAction
+  when (self.idx < 8u && target.idx % 2u == 0u && target.idx != self.idx)
+  emit Picked { who: self, what: target, verb_id: 1u }
+  score f32(target.idx)
+
+verb PickAny(self, target: Agent) =
+  action PickAnyAction
+  when (self.idx >= 8u && target.idx % 3u == 1u && target.idx != self.idx)
+  emit Picked { who: self, what: target, verb_id: 2u }
+  score 5.0
+
+@phase(post)
+physics RecordPick {
+  on Picked { who: w, what: t, verb_id: v } {
+    agents.set_picked(w, agents.idx(t) + 1u);
+    agents.set_verb_id(w, v);
+  }
+}

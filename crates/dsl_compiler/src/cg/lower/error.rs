@@ -500,6 +500,18 @@ pub enum LoweringError {
         span: Span,
     },
 
+    /// A `@serial(...)` deterministic-contention annotation on a
+    /// physics rule is malformed: missing/unknown group key, an
+    /// ordering column naming no event field, an unsupported column
+    /// type, or the annotation sits on a `@phase(per_agent)` rule
+    /// (which has no event stream to serialise). `detail` carries the
+    /// human-readable reason.
+    InvalidSerialAnnotation {
+        rule: PhysicsRuleId,
+        detail: String,
+        span: Span,
+    },
+
     /// A `Match` arm's `IrPattern::Struct { name, .. }` references a
     /// variant name that the lowering context's `variant_ids`
     /// registry does not know. Driver populates the registry from the
@@ -1372,6 +1384,11 @@ impl fmt::Display for LoweringError {
                 f,
                 "physics#{} at {}..{} has {} handler(s) but the driver supplied {} (EventKindId, EventRingId) entries",
                 rule.0, span.start, span.end, expected, got
+            ),
+            LoweringError::InvalidSerialAnnotation { rule, detail, span } => write!(
+                f,
+                "physics#{} has an invalid `@serial(...)` annotation at {}..{}: {}",
+                rule.0, span.start, span.end, detail
             ),
             LoweringError::UnsupportedPhysicsStmt {
                 rule,
