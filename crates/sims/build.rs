@@ -170,6 +170,9 @@ fn main() {
                 // AoE Path B walk over an area larger than one grid cell
                 // (crates/sims/tests/spatial_aoe_probe_pin.rs).
                 | "spatial_aoe_probe"
+                // `for x in spatial.q(self) { emit }` end to end
+                // (crates/sims/tests/spatial_emit_probe_pin.rs).
+                | "spatial_emit_probe"
         ) {
             continue;
         }

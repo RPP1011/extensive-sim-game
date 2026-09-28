@@ -1,0 +1,71 @@
+// spatial_emit_probe — the `for x in spatial.<q>(self) { emit … }` shape
+// (a per_agent body-form radius walk that emits events), end to end:
+// walk -> emit -> event ring -> materialized view fold.
+//
+// Driven by crates/sims/tests/spatial_emit_probe_pin.rs. A pair of
+// agents 1.0u apart must each see the other exactly once per pulse and
+// the Bumped events must land in `bumps_taken` exactly once each; a
+// third agent 3.0u away (outside radius 2) must see nobody.
+//
+// `Chat` (off unless the host sets `chatty`) reproduces a separate,
+// pre-existing event-ring defect: see the `#[ignore]`d test in the pin.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Bumped {
+  aggressor: AgentId,
+  victim:    AgentId,
+}
+
+entity Walker : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+field seen_near: f32
+field chatty:    u32
+
+@spatial(radius = 2.0, kind = [Agent])
+spatial_query nearby_bump(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+config probe {
+  pulse_every: u32 = 20,
+}
+
+// Same shape as the webband colony's Jostle: tick-gated per-agent rule,
+// radius-2 body walk, the body re-checks `other != self`, emits.
+physics Bump @phase(per_agent) {
+  on Tick {} where (self.alive && (world.tick % config.probe.pulse_every == 10)) {
+    for other in spatial.nearby_bump(self) {
+      if (other != self && other.alive) {
+        emit Bumped { aggressor: self, victim: other }
+        agents.set_seen_near(self, self.seen_near + 1.0);
+      }
+    }
+  }
+}
+
+@materialized(on_event = [Bumped])
+view bumps_taken(v: Agent) -> f32 {
+  initial: 0.0,
+  on Bumped { aggressor: _, victim: t } where t == v { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+// A busy emitter on the tick AFTER each pulse (the colony's shape: the
+// storm tick's Brawl rows are folded one tick later, while that tick's
+// own producers are already writing the ring).
+@replayable @gpu_amenable
+event Chatter {
+  who:  AgentId,
+  whom: AgentId,
+}
+
+physics Chat @phase(per_agent) {
+  on Tick {} where (self.alive && self.chatty == 1u
+                    && (world.tick % config.probe.pulse_every == 11)) {
+    emit Chatter { who: self, whom: self }
+  }
+}
