@@ -1,0 +1,12 @@
+// spatial_aoe_probe — AoE Path B regression: a circle of radius 20
+// (over three spatial-grid cells of 6 units) must hit every agent inside
+// it exactly once. Driven by crates/sims/tests/spatial_aoe_probe_pin.rs.
+
+ability Blast {
+    target: enemy
+    range: 5.0
+    cooldown: 10s
+    hint: damage
+
+    damage 1.0 in circle(20.0) [PHYSICAL: 100]
+}

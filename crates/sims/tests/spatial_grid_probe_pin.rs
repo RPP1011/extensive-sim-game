@@ -39,8 +39,8 @@ const NO_WATCH: u32 = 0xFFFF_FFFF;
 const CELL_SIZE: f32 = 6.0;
 const HALF_EXTENT: f32 = 64.0;
 const GRID_DIM: i32 = 22;
-/// Loose OOB-pool gate of the one-ring (un-annotated) body walk:
-/// `3 * (r+1)^2 * CELL_SIZE^2` with r = 1.
+/// Loose OOB-pool gate of the one-ring (un-annotated) walks, tiled and
+/// non-tiled alike: `3 * (r+1)^2 * CELL_SIZE^2` with r = 1.
 const LEGACY_GATE_SQ: f32 = 3.0 * 4.0 * CELL_SIZE * CELL_SIZE;
 
 struct Layout {
@@ -146,6 +146,8 @@ struct Outputs {
     seen_legacy: Vec<f32>,
     total_legacy: Vec<f32>,
     seen_legacy_body: Vec<f32>,
+    total_legacy_body: Vec<f32>,
+    higher_far: Vec<f32>,
 }
 
 fn expected(l: &Layout) -> Outputs {
@@ -153,8 +155,13 @@ fn expected(l: &Layout) -> Outputs {
     let mut o = Outputs::default();
     for i in 0..n {
         let p = &l.pos[i];
-        let (mut sf, mut tf, mut sn, mut tn, mut sl, mut tl, mut slb) = (0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        let (mut sf, mut tf, mut sn, mut tn, mut sl, mut tl) = (0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0);
+        let mut hf = 0.0f32;
         for j in 0..n {
+            // Every probe query's declared filter has `candidate != self`.
+            if j == i {
+                continue;
+            }
             let q = &l.pos[j];
             let d2 = dist_sq(p, q);
             let watched = l.tag[j] == l.watch[i];
@@ -166,12 +173,14 @@ fn expected(l: &Layout) -> Outputs {
                 tn += 1.0;
                 if watched { sn += 1.0; }
             }
-            if in_legacy_window(p, q) {
-                // Tiled PerCell fold: no distance gate.
+            if d2 <= R_FAR * R_FAR && l.tag[j] > l.tag[i] {
+                hf += 1.0;
+            }
+            // One-ring walk (tiled fold and non-tiled body alike): the
+            // 3x3x3 window around self's cell plus the loose gate.
+            if in_legacy_window(p, q) && d2 <= LEGACY_GATE_SQ {
                 tl += 1.0;
                 if watched { sl += 1.0; }
-                // Per-agent body walk: loose OOB-pool gate.
-                if watched && d2 <= LEGACY_GATE_SQ { slb += 1.0; }
             }
         }
         o.seen_far.push(sf);
@@ -182,7 +191,9 @@ fn expected(l: &Layout) -> Outputs {
         o.total_body.push(tf);
         o.seen_legacy.push(sl);
         o.total_legacy.push(tl);
-        o.seen_legacy_body.push(slb);
+        o.seen_legacy_body.push(sl);
+        o.total_legacy_body.push(tl);
+        o.higher_far.push(hf);
     }
     o
 }
@@ -214,6 +225,8 @@ fn run(l: &Layout) -> Option<Outputs> {
         seen_legacy: rd(|s| &s.agent_seen_legacy_buf),
         total_legacy: rd(|s| &s.agent_total_legacy_buf),
         seen_legacy_body: rd(|s| &s.agent_seen_legacy_body_buf),
+        total_legacy_body: rd(|s| &s.agent_total_legacy_body_buf),
+        higher_far: rd(|s| &s.agent_higher_far_buf),
     })
 }
 
@@ -268,7 +281,7 @@ fn spatial_grid_walks_honour_radius_density_and_edges() {
     // Sanity on the reference itself: the scenario-specific claims hold.
     assert_eq!(want.seen_far[0], 1.0, "reference: slot 1 (25u away) is within R_FAR of slot 0");
     assert_eq!(want.seen_legacy[0], 0.0, "reference: slot 1 is outside slot 0's one-ring window");
-    assert!(want.total_legacy[2] >= 101.0, "reference: dense cell holds >= 101 agents");
+    assert!(want.total_legacy[2] >= 100.0, "reference: dense cell holds >= 101 agents (100 besides self)");
     for (name, col) in [
         ("seen_far", &want.seen_far),
         ("seen_near", &want.seen_near),
@@ -288,6 +301,8 @@ fn spatial_grid_walks_honour_radius_density_and_edges() {
     check("seen_legacy", &got.seen_legacy, &want.seen_legacy, &layout, &mut errors);
     check("total_legacy", &got.total_legacy, &want.total_legacy, &layout, &mut errors);
     check("seen_legacy_body", &got.seen_legacy_body, &want.seen_legacy_body, &layout, &mut errors);
+    check("total_legacy_body", &got.total_legacy_body, &want.total_legacy_body, &layout, &mut errors);
+    check("higher_far", &got.higher_far, &want.higher_far, &layout, &mut errors);
     if !errors.is_empty() {
         let limit = std::env::var("SPATIAL_PROBE_SHOW").ok().and_then(|v| v.parse().ok()).unwrap_or(40usize);
         let shown: Vec<&String> = errors.iter().take(limit).collect();
@@ -298,6 +313,18 @@ fn spatial_grid_walks_honour_radius_density_and_edges() {
             shown.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n")
         );
     }
+
+    // Tiled (PerCell fold) and non-tiled (per-agent body) walks of the
+    // same un-annotated query agree exactly, agent by agent — including
+    // the agents clamped into edge cells from outside the world.
+    assert!(
+        got.seen_legacy == got.seen_legacy_body && got.total_legacy == got.total_legacy_body,
+        "tiled and non-tiled walks of probe_legacy disagree"
+    );
+    // The un-annotated query only reaches the one-ring window, and the
+    // declared filter really excludes self (a lone agent sees nothing).
+    let lone = layout.pos.iter().position(|p| *p == [-90.0, 10.0, 0.0]).expect("lone agent");
+    assert_eq!(got.total_near[lone], 0.0, "self must be filtered out of its own walk");
 
     // Determinism: a second same-seed run is byte-identical.
     let again = run(&layout).expect("adapter present on first run");

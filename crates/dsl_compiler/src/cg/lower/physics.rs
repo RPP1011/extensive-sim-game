@@ -1230,6 +1230,46 @@ fn lower_for_spatial_body(
         body_ids
     };
 
+    // Apply the query's declared filter (`spatial_query q(self,
+    // candidate) = <filter>`) as an outer `if` around the body: only
+    // candidates passing it run the body. Lowered while the binder is
+    // in scope (`candidate` → binder, `self` → the walk origin).
+    let final_ids = match super::spatial::lower_declared_filter(iter, binder_name, span, ctx) {
+        Ok(None) => final_ids,
+        Ok(Some(cond_id)) => {
+            let pre = std::mem::take(&mut ctx.pending_pre_stmts);
+            let inner = match ctx
+                .builder
+                .add_stmt_list(CgStmtList::new(final_ids))
+                .map_err(|e| LoweringError::BuilderRejected { error: e, span })
+            {
+                Ok(id) => id,
+                Err(e) => {
+                    ctx.fold_binder_name = prev_binder;
+                    return Err(e);
+                }
+            };
+            let if_id = match push_stmt(
+                CgStmt::If { cond: cond_id, then: inner, else_: None },
+                span,
+                ctx,
+            ) {
+                Ok(id) => id,
+                Err(e) => {
+                    ctx.fold_binder_name = prev_binder;
+                    return Err(e);
+                }
+            };
+            let mut combined = pre;
+            combined.push(if_id);
+            combined
+        }
+        Err(e) => {
+            ctx.fold_binder_name = prev_binder;
+            return Err(e);
+        }
+    };
+
     // Restore prior fold-binder slot before exiting.
     ctx.fold_binder_name = prev_binder;
 

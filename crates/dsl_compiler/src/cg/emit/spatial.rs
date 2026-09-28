@@ -28,7 +28,14 @@
 //!   [`CELL_SIZE`] and may be a `@runtime` config value) and keeps
 //!   exactly the candidates with `|candidate - origin|² <= R²`. An
 //!   un-annotated query keeps the historical one-ring (3³ = 27 cell)
-//!   walk with its loose cell-diagonal gate.
+//!   walk with its loose cell-diagonal gate — on the tiled PerCell
+//!   kernel and the per-agent walk alike, so both return the same
+//!   candidates.
+//! - **Declared filter.** The query's `= <filter>` is applied to every
+//!   candidate (fold: the projection is selected against it; `for`
+//!   body: the body runs under it), with `self` bound to the walk origin.
+//! - **Ability AoE.** Path B area walks cover every cell the shape's
+//!   bounding reach overlaps, then apply the exact shape test.
 //! - **Each cell at most once.** Out-of-grid neighbour coordinates are
 //!   skipped (`cell_in_grid`), never clamped onto the edge cell — a
 //!   clamp would make a walk at the edge visit the same edge cell (and

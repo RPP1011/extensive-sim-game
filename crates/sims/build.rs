@@ -167,6 +167,9 @@ fn main() {
                 // duplicate visits near/beyond the world edge
                 // (crates/sims/tests/spatial_grid_probe_pin.rs).
                 | "spatial_grid_probe"
+                // AoE Path B walk over an area larger than one grid cell
+                // (crates/sims/tests/spatial_aoe_probe_pin.rs).
+                | "spatial_aoe_probe"
         ) {
             continue;
         }

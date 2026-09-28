@@ -187,6 +187,13 @@ pub struct LoweringCtx<'a> {
     /// (`CgStmt::ForEachNeighbor{,Body}::radius`). A query absent from
     /// the map has no declared radius and keeps the one-ring walk.
     pub spatial_query_radii: HashMap<String, super::spatial::DeclaredSpatialRadius>,
+    /// `spatial_query` name → its resolved filter expression (the
+    /// `= <expr>` over `self` / `candidate`), for every query whose
+    /// filter is not the literal `true`. Populated by the driver next to
+    /// [`Self::spatial_query_radii`]; consumed by
+    /// [`super::spatial::lower_declared_filter`], which binds it to each
+    /// fold / `for` walk's origin and binder.
+    pub spatial_query_filters: HashMap<String, dsl_ast::ir::IrExprNode>,
     /// Captured `@lazy` view bodies for at-call-site inlining.
     /// `ViewId` → snapshot. Populated by
     /// [`super::view::lower_view`]'s lazy arm in Phase 2; consumed by
@@ -353,6 +360,7 @@ impl<'a> LoweringCtx<'a> {
             current_per_agent_rule: false,
             config_const_ids: HashMap::new(),
             spatial_query_radii: HashMap::new(),
+            spatial_query_filters: HashMap::new(),
             lazy_view_bodies: HashMap::new(),
             local_tys: HashMap::new(),
             event_layouts: HashMap::new(),
@@ -3163,6 +3171,41 @@ fn lower_fold_over_agents(
                 span,
             });
         }
+    };
+
+    // Apply the query's declared filter (`spatial_query q(self,
+    // candidate) = <filter>`): a candidate failing it contributes the
+    // accumulator's zero. Lowered while the binder is still in scope so
+    // `candidate` binds to it; `self` binds to the walk origin. Folding
+    // it into the projection (rather than a separate gate) keeps the
+    // tiled and non-tiled emit paths identical.
+    let projection_id = match (&spatial_iter_shape, iter) {
+        (Some(_), Some(node)) => {
+            match super::spatial::lower_declared_filter(node, binder, span, ctx) {
+                Ok(Some(filter_id)) => match add(
+                    ctx,
+                    CgExpr::Select {
+                        cond: filter_id,
+                        then: projection_id,
+                        else_: init_id,
+                        ty: acc_ty,
+                    },
+                    span,
+                ) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        ctx.fold_binder_name = prev_binder;
+                        return Err(e);
+                    }
+                },
+                Ok(None) => projection_id,
+                Err(e) => {
+                    ctx.fold_binder_name = prev_binder;
+                    return Err(e);
+                }
+            }
+        }
+        _ => projection_id,
     };
 
     // Restore prior fold binder before exiting.

@@ -1976,8 +1976,18 @@ fn resolve_bodies(
                 let mut scope = LocalScope::new();
                 let params = resolve_params(&d.params, &mut scope, symbols);
                 let filter = resolve_expr(&d.filter, &mut scope, symbols)?;
-                comp.spatial_queries[spatial_query_idx].params = params;
-                comp.spatial_queries[spatial_query_idx].filter = filter;
+                // Fill the slot pass 1 reserved for THIS name. (A running
+                // index over `Decl::SpatialQuery` alone would drift as soon
+                // as a `Decl::Query` — which reserves a slot in the same
+                // `comp.spatial_queries` vector — precedes it, writing the
+                // filter onto the wrong query.)
+                let slot = symbols
+                    .spatial_queries
+                    .get(&d.name)
+                    .map(|r| r.0 as usize)
+                    .unwrap_or(spatial_query_idx);
+                comp.spatial_queries[slot].params = params;
+                comp.spatial_queries[slot].filter = filter;
                 spatial_query_idx += 1;
             }
             Decl::Init(_) => {

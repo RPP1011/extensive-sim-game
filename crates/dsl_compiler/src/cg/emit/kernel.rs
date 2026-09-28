@@ -5142,7 +5142,25 @@ fn build_wgsl_body(
         let pos_prev = hazard.contains(&crate::cg::data_handle::AgentFieldId::Pos);
         let vel_prev = hazard.contains(&crate::cg::data_handle::AgentFieldId::Vel);
         drop(hazard);
-        write!(out, "{}", tiled_per_cell_preamble(pos_prev, vel_prev))
+        // Only cache `vel` in the tile when some op in the kernel reads
+        // it: the `agent_vel` binding exists only then, so an
+        // unconditional load made every pure-pos fold kernel fail WGSL
+        // validation (`agent_vel` undeclared). `pos` is always read —
+        // every ForEachNeighbor surfaces it for the cell window + gate.
+        let loads_vel = body_ops.iter().any(|id| {
+            prog.ops.get(id.0 as usize).is_some_and(|op| {
+                op.reads.iter().any(|h| {
+                    matches!(
+                        h,
+                        crate::cg::data_handle::DataHandle::AgentField {
+                            field: crate::cg::data_handle::AgentFieldId::Vel,
+                            ..
+                        }
+                    )
+                })
+            })
+        });
+        write!(out, "{}", tiled_per_cell_preamble(pos_prev, vel_prev, loads_vel))
             .expect("write to String never fails");
     }
 
@@ -5276,7 +5294,7 @@ fn build_wgsl_body(
 /// (`agent_pos_prev`/`agent_vel_prev`) instead of the live buffer —
 /// otherwise a hazardous tiled kernel (the boids `MoveBoid` shape)
 /// would race regardless of the generic redirect.
-fn tiled_per_cell_preamble(pos_prev: bool, vel_prev: bool) -> String {
+fn tiled_per_cell_preamble(pos_prev: bool, vel_prev: bool, loads_vel: bool) -> String {
     // After the three-phase counting sort, `spatial_grid_starts[c]`
     // is cell `c`'s start position in `spatial_grid_cells` and
     // `starts[c+1] - starts[c]` is the cell's count. The tile-load
@@ -5290,6 +5308,11 @@ fn tiled_per_cell_preamble(pos_prev: bool, vel_prev: bool) -> String {
     // neighbour cell from every query.)
     let pos_src = if pos_prev { "agent_pos_prev" } else { "agent_pos" };
     let vel_src = if vel_prev { "agent_vel_prev" } else { "agent_vel" };
+    let vel_load = if loads_vel {
+        format!("tile_vel[_dst_base + i] = {vel_src}[_aid];\n")
+    } else {
+        String::new()
+    };
     format!(
         "let home_cell = workgroup_id.x;\n\
          let lane = local_invocation_id.x;\n\
@@ -5323,7 +5346,7 @@ fn tiled_per_cell_preamble(pos_prev: bool, vel_prev: bool) -> String {
          \x20       for (var i: u32 = 0u; i < _tile_n; i = i + 1u) {{\n\
          \x20           let _aid = spatial_grid_cells[_nbr_start + i];\n\
          \x20           tile_pos[_dst_base + i] = {pos_src}[_aid];\n\
-         \x20           tile_vel[_dst_base + i] = {vel_src}[_aid];\n\
+         \x20           {vel_load}\
          \x20       }}\n\
          \x20   }}\n\
          \x20   tile_count[nbr] = _nbr_count;\n\

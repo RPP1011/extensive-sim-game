@@ -2233,6 +2233,12 @@ fn populate_spatial_query_radii(
     use super::spatial::DeclaredSpatialRadius;
     use dsl_ast::ast::AnnotationValue;
     for q in &comp.spatial_queries {
+        // The declared filter (`spatial_query <name>(self, candidate) =
+        // <expr>`). A literal `true` is the pass-1 placeholder every
+        // `query` decl keeps — nothing to apply.
+        if !matches!(q.filter.kind, IrExpr::LitBool(true)) {
+            ctx.spatial_query_filters.insert(q.name.clone(), q.filter.clone());
+        }
         let radius_arg = q
             .annotations
             .iter()
@@ -2481,72 +2487,89 @@ fn lower_filter_for_mask(
 /// `value_args` straight through — a stray binder would just be
 /// re-checked against the same value-arg slice.
 fn walk_substitute(node: &IrExprNode, value_args: &[IrCallArg]) -> IrExprNode {
+    // Substitute LocalRef(2..) with the corresponding value arg.
+    // LocalRef(0)=self / LocalRef(1)=candidate are not substituted —
+    // they fall through and get resolved by `lower_expr` (self →
+    // AgentSelfId; candidate → PerPair when `ctx.target_local` is set).
+    walk_substitute_with(node, &|local_ref, _name| {
+        if local_ref.0 >= 2 {
+            let idx = (local_ref.0 - 2) as usize;
+            if idx < value_args.len() {
+                return Some(value_args[idx].value.clone());
+            }
+        }
+        None
+    })
+}
+
+/// General form of [`walk_substitute`]: rebuild `node`, replacing every
+/// `IrExpr::Local(ref, name)` for which `subst(ref, name)` returns
+/// `Some(e)` with `e`. Also used by the spatial-walk filter lowering
+/// (`cg::lower::spatial::lower_declared_filter`) to bind a
+/// `spatial_query` filter's `self` / `candidate` to the walk's origin
+/// and binder.
+pub(crate) fn walk_substitute_with(
+    node: &IrExprNode,
+    subst: &dyn Fn(dsl_ast::ir::LocalRef, &str) -> Option<IrExprNode>,
+) -> IrExprNode {
     let new_kind = match &node.kind {
         IrExpr::Local(local_ref, name) => {
-            // Substitute LocalRef(2..) with the corresponding value
-            // arg. LocalRef(0)=self / LocalRef(1)=candidate are not
-            // substituted — they fall through and get resolved by
-            // `lower_expr` (self → AgentSelfId; candidate → PerPair
-            // when `ctx.target_local` is set).
-            if local_ref.0 >= 2 {
-                let idx = (local_ref.0 - 2) as usize;
-                if idx < value_args.len() {
-                    return value_args[idx].value.clone();
-                }
+            if let Some(replacement) = subst(*local_ref, name) {
+                return replacement;
             }
             IrExpr::Local(*local_ref, name.clone())
         }
         IrExpr::Field { base, field_name, field } => IrExpr::Field {
-            base: Box::new(walk_substitute(base, value_args)),
+            base: Box::new(walk_substitute_with(base, subst)),
             field_name: field_name.clone(),
             field: field.clone(),
         },
         IrExpr::Index(lhs, rhs) => IrExpr::Index(
-            Box::new(walk_substitute(lhs, value_args)),
-            Box::new(walk_substitute(rhs, value_args)),
+            Box::new(walk_substitute_with(lhs, subst)),
+            Box::new(walk_substitute_with(rhs, subst)),
         ),
         IrExpr::Binary(op, lhs, rhs) => IrExpr::Binary(
             *op,
-            Box::new(walk_substitute(lhs, value_args)),
-            Box::new(walk_substitute(rhs, value_args)),
+            Box::new(walk_substitute_with(lhs, subst)),
+            Box::new(walk_substitute_with(rhs, subst)),
         ),
         IrExpr::Unary(op, inner) => {
-            IrExpr::Unary(*op, Box::new(walk_substitute(inner, value_args)))
+            IrExpr::Unary(*op, Box::new(walk_substitute_with(inner, subst)))
         }
         IrExpr::In(lhs, rhs) => IrExpr::In(
-            Box::new(walk_substitute(lhs, value_args)),
-            Box::new(walk_substitute(rhs, value_args)),
+            Box::new(walk_substitute_with(lhs, subst)),
+            Box::new(walk_substitute_with(rhs, subst)),
         ),
         IrExpr::Contains(lhs, rhs) => IrExpr::Contains(
-            Box::new(walk_substitute(lhs, value_args)),
-            Box::new(walk_substitute(rhs, value_args)),
+            Box::new(walk_substitute_with(lhs, subst)),
+            Box::new(walk_substitute_with(rhs, subst)),
         ),
         IrExpr::Quantifier { kind, binder, binder_name, iter, body } => IrExpr::Quantifier {
             kind: *kind,
             binder: *binder,
             binder_name: binder_name.clone(),
-            iter: Box::new(walk_substitute(iter, value_args)),
-            body: Box::new(walk_substitute(body, value_args)),
+            iter: Box::new(walk_substitute_with(iter, subst)),
+            body: Box::new(walk_substitute_with(body, subst)),
         },
         IrExpr::Fold { kind, binder, binder_name, iter, body } => IrExpr::Fold {
             kind: kind.clone(),
             binder: *binder,
             binder_name: binder_name.clone(),
-            iter: iter.as_ref().map(|i| Box::new(walk_substitute(i, value_args))),
-            body: Box::new(walk_substitute(body, value_args)),
+            iter: iter.as_ref().map(|i| Box::new(walk_substitute_with(i, subst))),
+            body: Box::new(walk_substitute_with(body, subst)),
         },
         IrExpr::List(items) => IrExpr::List(
-            items.iter().map(|i| walk_substitute(i, value_args)).collect(),
+            items.iter().map(|i| walk_substitute_with(i, subst)).collect(),
         ),
         IrExpr::Tuple(items) => IrExpr::Tuple(
-            items.iter().map(|i| walk_substitute(i, value_args)).collect(),
+            items.iter().map(|i| walk_substitute_with(i, subst)).collect(),
         ),
         IrExpr::ViewCall(vr, args) => IrExpr::ViewCall(
             *vr,
             args.iter()
                 .map(|a| IrCallArg {
                     name: a.name.clone(),
-                    value: walk_substitute(&a.value, value_args),
+                    value: walk_substitute_with(&a.value, subst),
                     span: a.span,
                 })
                 .collect(),
@@ -2557,7 +2580,7 @@ fn walk_substitute(node: &IrExprNode, value_args: &[IrCallArg]) -> IrExprNode {
             args.iter()
                 .map(|a| IrCallArg {
                     name: a.name.clone(),
-                    value: walk_substitute(&a.value, value_args),
+                    value: walk_substitute_with(&a.value, subst),
                     span: a.span,
                 })
                 .collect(),
@@ -2567,7 +2590,7 @@ fn walk_substitute(node: &IrExprNode, value_args: &[IrCallArg]) -> IrExprNode {
             args.iter()
                 .map(|a| IrCallArg {
                     name: a.name.clone(),
-                    value: walk_substitute(&a.value, value_args),
+                    value: walk_substitute_with(&a.value, subst),
                     span: a.span,
                 })
                 .collect(),
@@ -2577,7 +2600,7 @@ fn walk_substitute(node: &IrExprNode, value_args: &[IrCallArg]) -> IrExprNode {
             args.iter()
                 .map(|a| IrCallArg {
                     name: a.name.clone(),
-                    value: walk_substitute(&a.value, value_args),
+                    value: walk_substitute_with(&a.value, subst),
                     span: a.span,
                 })
                 .collect(),
@@ -2587,7 +2610,7 @@ fn walk_substitute(node: &IrExprNode, value_args: &[IrCallArg]) -> IrExprNode {
             args.iter()
                 .map(|a| IrCallArg {
                     name: a.name.clone(),
-                    value: walk_substitute(&a.value, value_args),
+                    value: walk_substitute_with(&a.value, subst),
                     span: a.span,
                 })
                 .collect(),
@@ -2599,7 +2622,7 @@ fn walk_substitute(node: &IrExprNode, value_args: &[IrCallArg]) -> IrExprNode {
                 .iter()
                 .map(|a| IrCallArg {
                     name: a.name.clone(),
-                    value: walk_substitute(&a.value, value_args),
+                    value: walk_substitute_with(&a.value, subst),
                     span: a.span,
                 })
                 .collect(),
@@ -2611,7 +2634,7 @@ fn walk_substitute(node: &IrExprNode, value_args: &[IrCallArg]) -> IrExprNode {
                 .iter()
                 .map(|f| dsl_ast::ir::IrFieldInit {
                     name: f.name.clone(),
-                    value: walk_substitute(&f.value, value_args),
+                    value: walk_substitute_with(&f.value, subst),
                     span: f.span,
                 })
                 .collect(),
@@ -2619,44 +2642,44 @@ fn walk_substitute(node: &IrExprNode, value_args: &[IrCallArg]) -> IrExprNode {
         IrExpr::Ctor { name, ctor, args } => IrExpr::Ctor {
             name: name.clone(),
             ctor: ctor.clone(),
-            args: args.iter().map(|a| walk_substitute(a, value_args)).collect(),
+            args: args.iter().map(|a| walk_substitute_with(a, subst)).collect(),
         },
         IrExpr::Match { scrutinee, arms } => IrExpr::Match {
-            scrutinee: Box::new(walk_substitute(scrutinee, value_args)),
+            scrutinee: Box::new(walk_substitute_with(scrutinee, subst)),
             arms: arms
                 .iter()
                 .map(|arm| dsl_ast::ir::IrMatchArm {
                     pattern: arm.pattern.clone(),
-                    body: walk_substitute(&arm.body, value_args),
+                    body: walk_substitute_with(&arm.body, subst),
                     span: arm.span,
                 })
                 .collect(),
         },
         IrExpr::If { cond, then_expr, else_expr } => IrExpr::If {
-            cond: Box::new(walk_substitute(cond, value_args)),
-            then_expr: Box::new(walk_substitute(then_expr, value_args)),
+            cond: Box::new(walk_substitute_with(cond, subst)),
+            then_expr: Box::new(walk_substitute_with(then_expr, subst)),
             else_expr: else_expr
                 .as_ref()
-                .map(|e| Box::new(walk_substitute(e, value_args))),
+                .map(|e| Box::new(walk_substitute_with(e, subst))),
         },
         IrExpr::PerUnit { expr, delta } => IrExpr::PerUnit {
-            expr: Box::new(walk_substitute(expr, value_args)),
-            delta: Box::new(walk_substitute(delta, value_args)),
+            expr: Box::new(walk_substitute_with(expr, subst)),
+            delta: Box::new(walk_substitute_with(delta, subst)),
         },
         IrExpr::AbilityOnCooldown(inner) => {
-            IrExpr::AbilityOnCooldown(Box::new(walk_substitute(inner, value_args)))
+            IrExpr::AbilityOnCooldown(Box::new(walk_substitute_with(inner, subst)))
         }
         IrExpr::BeliefsAccessor { observer, target, field } => IrExpr::BeliefsAccessor {
-            observer: Box::new(walk_substitute(observer, value_args)),
-            target: Box::new(walk_substitute(target, value_args)),
+            observer: Box::new(walk_substitute_with(observer, subst)),
+            target: Box::new(walk_substitute_with(target, subst)),
             field: field.clone(),
         },
         IrExpr::BeliefsConfidence { observer, target } => IrExpr::BeliefsConfidence {
-            observer: Box::new(walk_substitute(observer, value_args)),
-            target: Box::new(walk_substitute(target, value_args)),
+            observer: Box::new(walk_substitute_with(observer, subst)),
+            target: Box::new(walk_substitute_with(target, subst)),
         },
         IrExpr::BeliefsView { observer, view_name } => IrExpr::BeliefsView {
-            observer: Box::new(walk_substitute(observer, value_args)),
+            observer: Box::new(walk_substitute_with(observer, subst)),
             view_name: view_name.clone(),
         },
         // Leaves carrying no nested `IrExprNode` — clone directly.

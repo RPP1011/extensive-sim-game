@@ -1,0 +1,50 @@
+// spatial_aoe_probe — AoE Path B regression for the spatial grid.
+//
+// Each Caster casts Blast (assets/ability_test/spatial_aoe_probe/:
+// `damage 1.0 in circle(20.0)`) exactly once, on tick 1, at the Anchor
+// beside it. Every agent within 20 units of that Anchor must take the
+// damage exactly once; nobody further away may take any. 20 units is more
+// than three 6-unit grid cells, so this pins that the AoE walk covers the
+// whole area (it used to walk the 27 cells around the centre only) and
+// that no candidate is visited twice (the second cast is at the world
+// corner, where the old clamped neighbour walk revisited the edge cells).
+//
+// Driven by crates/sims/tests/spatial_aoe_probe_pin.rs.
+//
+// ENTITY TYPE TABLE (declaration order alphabetised):
+//   Anchor = 0, Caster = 1, Dummy = 2.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event EffectDamageApplied {
+  actor: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+entity Anchor : Agent { pos: vec3, vel: vec3 }
+entity Caster : Agent { pos: vec3, vel: vec3 }
+entity Dummy  : Agent { pos: vec3, vel: vec3 }
+
+@spatial(radius = 3.0, kind = [Agent])
+spatial_query nearby_anchor(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+physics CastBlast @phase(per_agent) {
+  on Tick {} where (self.alive && self.creature_type == 1 && world.tick == 1) {
+    for other in spatial.nearby_anchor(self) {
+      if (other.alive && other.creature_type == 0) {
+        apply_ability Blast by self target other
+      }
+    }
+  }
+}
+
+@phase(post)
+physics ApplyBlastDamage {
+  on EffectDamageApplied { actor: _, target: t, amount: amt } {
+    let old_hp = agents.hp(t);
+    agents.set_hp(t, old_hp - amt);
+  }
+}

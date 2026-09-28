@@ -249,3 +249,85 @@ physics Ping @phase(per_agent) {
         outcome.diagnostics.iter().map(|d| d.to_string()).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn declared_filter_is_applied_in_fold_and_body_walks() {
+    let art = compile_inline(SRC);
+    // Fold form: the projection is wrapped in the query's filter
+    // (`candidate != self`, with candidate -> per_pair_candidate and
+    // self -> the walk origin, here agent_id).
+    let fold = kernel(&art, "CountRadius");
+    assert!(fold.contains("select(0.0, 1.0, (per_pair_candidate != agent_id))"), "{fold}");
+    // Body form: the body runs under `if (<filter>)`.
+    let body = kernel(&art, "PingFar");
+    assert!(body.contains("if ((per_pair_candidate != agent_id)) {"), "{body}");
+    // Tiled fold: same filter inside the tile walk.
+    let tiled = kernel(&art, "Flock");
+    assert!(tiled.contains("(per_pair_candidate != agent_id)"), "{tiled}");
+}
+
+#[test]
+fn declared_filter_binds_self_to_a_non_self_origin() {
+    // `self` in the declaration means the walk origin — here an agent
+    // bound from an event, not the dispatching thread's agent.
+    let src = r#"
+event Tick { }
+@replayable @gpu_amenable
+event Poke { who: AgentId }
+entity Walker : Agent { pos: vec3, vel: vec3 }
+@spatial(radius = 4.0, kind = [Agent])
+spatial_query richer(self: AgentId, candidate: AgentId) =
+  candidate != self && candidate.hp > self.hp
+@phase(post)
+physics Around {
+  on Poke { who: w } {
+    let n = sum(o in spatial.richer(w) where 1.0);
+    agents.set_mana(w, n);
+  }
+}
+"#;
+    let art = compile_inline(src);
+    let body = kernel(&art, "Around");
+    assert!(!body.contains("!= agent_id"), "self must not bind to agent_id here:\n{body}");
+    // The origin is the event-bound `w` (a `local_N`); the filter's
+    // `self` reads resolve to it.
+    assert!(body.contains("(per_pair_candidate != local_"), "{body}");
+    assert!(body.contains("agent_hp[per_pair_candidate] > agent_hp[target_expr_"), "{body}");
+    assert_all_kernels_validate(&art);
+}
+
+#[test]
+fn tiled_walk_gates_like_the_non_tiled_walk() {
+    let art = compile_inline(SRC);
+    let tiled = kernel(&art, "Flock");
+    assert!(tiled.contains("let _gate_radius_sq = 3.0 * f32(4u) * SPATIAL_CELL_SIZE * SPATIAL_CELL_SIZE;"), "{tiled}");
+    assert!(tiled.contains("let _gate_dxyz = tile_pos[_tile_idx] - _gate_origin_pos;"), "{tiled}");
+    let spill = tiled.split("} else {").nth(1).unwrap_or("");
+    assert!(spill.contains("_gate_dxyz = agent_pos"), "spill branch must gate too:\n{tiled}");
+    let ring = kernel(&art, "PingRing");
+    assert!(ring.contains("let _gate_radius_sq = 3.0 * f32(4u) * SPATIAL_CELL_SIZE * SPATIAL_CELL_SIZE;"), "{ring}");
+}
+
+#[test]
+fn tiled_kernel_without_vel_reads_skips_the_vel_tile() {
+    let src = r#"
+event Tick { }
+entity Walker : Agent { pos: vec3, vel: vec3 }
+spatial_query ring(self: AgentId, candidate: AgentId) =
+  candidate != self
+physics CountRing @phase(per_agent) {
+  on Tick {} {
+    let n = sum(o in spatial.ring(self) where 1.0);
+    agents.set_mana(self, n);
+  }
+}
+"#;
+    let art = compile_inline(src);
+    let body = kernel(&art, "CountRing");
+    assert!(body.contains("tile_pos[_dst_base + i]"), "should be the tiled kernel:\n{body}");
+    assert!(!body.contains("tile_vel[_dst_base + i]"), "vel must not be loaded:\n{body}");
+    assert_all_kernels_validate(&art);
+    // ...and a kernel that does read vel still loads it.
+    let flock = compile_inline(SRC);
+    assert!(kernel(&flock, "Flock").contains("tile_vel[_dst_base + i]"));
+}

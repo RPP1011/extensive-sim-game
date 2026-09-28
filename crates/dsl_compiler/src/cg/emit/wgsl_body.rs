@@ -3607,13 +3607,23 @@ fn lower_cg_stmt_body_to_wgsl(
 ///
 /// **AOE shape (`with_aoe_dispatch == true`)**: branches on
 /// `area_kinds[effect_base + i]`:
-///   - `0u` (Circle): walk the 27-cell spatial neighborhood around
+///
+/// **Spatial walk (every shape).** Each branch walks every grid cell the
+/// box `centre ± reach` overlaps, where `reach` bounds the shape's extent
+/// (radius, cone range, box half-diagonal, line length + width, …), via
+/// `pos_to_cell_xyz` — so an area larger than `SPATIAL_CELL_SIZE` is
+/// covered in full and each cell is visited once (no duplicate targets at
+/// the world edge). The per-shape test below then selects candidates
+/// exactly. (Before the spatial-grid fix every shape walked the fixed
+/// 27-cell ring and silently missed anything beyond one cell.)
+///
+///   - `0u` (Circle): walk the cells around
 ///     `aoe_center = agent_pos[target_slot]`; for each candidate within
 ///     `dot(d, d) <= radius²`, run the chronicle arm chain + nested
 ///     loop in a `{ let target_slot = candidate; … }` block that
 ///     shadows the outer `target_slot` for chronicle writes. P11 sort
 ///     handles atomicAdd-induced order non-determinism on readback.
-///   - `1u` (Cone, #178): walk the 27-cell neighborhood around the
+///   - `1u` (Cone, #178): walk the cells around the
 ///     APEX (`agent_pos[caster_slot]`); for each candidate within
 ///     `dist² ≤ range²` AND `dot(normalize(cand - apex), direction)
 ///     ≥ cos(half_angle_rad)`, shadow `target_slot = candidate` and
@@ -3624,16 +3634,13 @@ fn lower_cg_stmt_body_to_wgsl(
 ///     excluded by the `_dist_sq < 1e-6 -> continue` guard so the
 ///     CPU oracle (`apply_program_aoe_cone_filter`) and GPU emit
 ///     match bit-for-bit.
-///   - `5u` (Box, #179): walk the 27-cell neighborhood around
+///   - `5u` (Box, #179): walk the cells around
 ///     `aoe_center = agent_pos[target_slot]` (same convention as
 ///     Circle); for each candidate within
 ///     `abs(d.x) <= wx && abs(d.y) <= wy && abs(d.z) <= wz` (closed
 ///     AABB — candidates exactly at a wall are in-box), shadow
 ///     `target_slot = candidate` and run the chronicle arm chain.
-///     CPU oracle is `apply_program_aoe_box_filter`. **Spatial walk
-///     limitation:** any half-extent exceeding `SPATIAL_CELL_SIZE`
-///     would miss candidates beyond the 27-cell ring; test fixtures
-///     keep extents ≤ cell size.
+///     CPU oracle is `apply_program_aoe_box_filter`.
 ///   - else (sentinel `0xFFu` = no area, or non-AOE-Path-B shape):
 ///     fall through to the single-target chain with the explicit
 ///     cast `target_slot`. Other shapes (Line/Sphere/Capsule/etc.)
@@ -3711,22 +3718,22 @@ fn build_apply_ability_per_target_body(
     s.push_str(
         "        // #121 AOE Path B: per-effect-slot AOE expansion. Flag is on\n\
          \x20       // → branch on `area_kinds[effect_base + i]`. Circle (0u)\n\
-         \x20       // walks the 27-cell spatial neighborhood around\n\
+         \x20       // walks the cells within its radius around\n\
          \x20       // `agent_pos[target_slot]` and runs the chronicle arm chain\n\
          \x20       // once per in-radius candidate (shadowing target_slot).\n\
-         \x20       // Cone (1u) walks the 27 cells around `agent_pos[caster_slot]`\n\
+         \x20       // Cone (1u) walks the cells within range of `agent_pos[caster_slot]`\n\
          \x20       // (the apex), gates each candidate on range² ∧ angular dot,\n\
          \x20       // and shadows target_slot the same way (#178).\n\
-         \x20       // Box (5u) walks the 27 cells around `agent_pos[target_slot]`,\n\
+         \x20       // Box (5u) walks the cells within its extent of `agent_pos[target_slot]`,\n\
          \x20       // gates each candidate on per-axis `|d.<axis>| <= w<axis>`\n\
          \x20       // (closed AABB), and shadows target_slot the same way (#179).\n\
          \x20       // Sphere (6u) is mathematically equivalent to Circle today\n\
-         \x20       // (3D dist² ≤ radius² over the 27-cell ring); separate branch\n\
+         \x20       // (3D dist² ≤ radius²); separate branch\n\
          \x20       // for code clarity (#180).\n\
-         \x20       // Ring (3u) walks the 27 cells around `agent_pos[target_slot]`,\n\
+         \x20       // Ring (3u) walks the cells within `outer` of `agent_pos[target_slot]`,\n\
          \x20       // gates each candidate on `inner² ≤ dist² ≤ outer²` (closed\n\
          \x20       // annulus, #180).\n\
-         \x20       // Line (2u) walks the 27 cells around `agent_pos[caster_slot]`\n\
+         \x20       // Line (2u) walks the cells within length + width of `agent_pos[caster_slot]`\n\
          \x20       // (the apex), gates each candidate on `0 ≤ along ≤ length` ∧\n\
          \x20       // `perp_sq ≤ (width/2)²` (forward-facing rectangle, #180).\n\
          \x20       // Sentinel 0xFFu / unrecognised shape → single-target\n\
@@ -3738,20 +3745,20 @@ fn build_apply_ability_per_target_body(
          \x20           let radius: f32 = ability_registry_area_args[area_args_base + 0u];\n\
          \x20           let radius_sq: f32 = radius * radius;\n\
          \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
-         \x20           // 27-cell neighborhood walk (mirrors the cell-walk path\n\
+         \x20           // Cell-box walk (mirrors the cell-walk path\n\
          \x20           // of `emit_for_each_neighbor_body` — same `cell_index`\n\
          \x20           // helper from the spatial prelude, same\n\
          \x20           // `spatial_grid_starts[cell..+1]` slot iteration).\n\
-         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
-         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
-         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
-         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
-         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
-         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
-         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
-         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20           // Walk every cell the shape can touch: the box centre +/- reach,\n\
+         \x20           // reach = a bound on the shape's extent (padded 1e-3 against f32\n\
+         \x20           // rounding). The exact shape test below filters candidates.\n\
+         \x20           let _aoe_reach = vec3<f32>((radius) + 1.0e-3);\n\
+         \x20           let _aoe_lo = pos_to_cell_xyz(aoe_center - _aoe_reach);\n\
+         \x20           let _aoe_hi = pos_to_cell_xyz(aoe_center + _aoe_reach);\n\
+         \x20           for (var _qz: i32 = _aoe_lo.z; _qz <= _aoe_hi.z; _qz = _qz + 1) {\n\
+         \x20               for (var _qy: i32 = _aoe_lo.y; _qy <= _aoe_hi.y; _qy = _qy + 1) {\n\
+         \x20                   for (var _qx: i32 = _aoe_lo.x; _qx <= _aoe_hi.x; _qx = _qx + 1) {\n\
+         \x20                       let _cell = cell_index(_qx, _qy, _qz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
          \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
@@ -3807,16 +3814,16 @@ fn build_apply_ability_per_target_body(
          \x20               // Non-degenerate cone. Direction = normalize(target -\n\
          \x20               // apex); inverseSqrt matches CPU's `recip().sqrt()`.\n\
          \x20               let direction: vec3<f32> = direction_raw * inverseSqrt(dir_len_sq);\n\
-         \x20               let _self_cell_f = (apex + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
-         \x20               let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
-         \x20               let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
-         \x20               let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
-         \x20               let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
-         \x20               for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
-         \x20                   for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
-         \x20                       for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
-         \x20                           if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
-         \x20                           let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20               // Walk every cell the shape can touch: the box centre +/- reach,\n\
+         \x20               // reach = a bound on the shape's extent (padded 1e-3 against f32\n\
+         \x20               // rounding). The exact shape test below filters candidates.\n\
+         \x20               let _aoe_reach = vec3<f32>((range) + 1.0e-3);\n\
+         \x20               let _aoe_lo = pos_to_cell_xyz(apex - _aoe_reach);\n\
+         \x20               let _aoe_hi = pos_to_cell_xyz(apex + _aoe_reach);\n\
+         \x20               for (var _qz: i32 = _aoe_lo.z; _qz <= _aoe_hi.z; _qz = _qz + 1) {\n\
+         \x20                   for (var _qy: i32 = _aoe_lo.y; _qy <= _aoe_hi.y; _qy = _qy + 1) {\n\
+         \x20                       for (var _qx: i32 = _aoe_lo.x; _qx <= _aoe_hi.x; _qx = _qx + 1) {\n\
+         \x20                           let _cell = cell_index(_qx, _qy, _qz);\n\
          \x20                           let _start = spatial_grid_starts[_cell];\n\
          \x20                           let _end = spatial_grid_starts[_cell + 1u];\n\
          \x20                           for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
@@ -3859,26 +3866,21 @@ fn build_apply_ability_per_target_body(
          \x20           // Per-candidate gate: per-axis `|d.<axis>| <= w<axis>`\n\
          \x20           // (closed AABB; candidates exactly at a wall are in-box).\n\
          \x20           //\n\
-         \x20           // **Spatial walk limitation.** The 27-cell walk only\n\
-         \x20           // visits the immediate cell ring around the center.\n\
-         \x20           // Any half-extent exceeding `SPATIAL_CELL_SIZE` would\n\
-         \x20           // miss candidates beyond the 27-cell footprint.\n\
-         \x20           // Test fixtures must keep extents ≤ cell size.\n\
          \x20           let area_args_base: u32 = (effect_base + i) * 4u;\n\
          \x20           let wx: f32 = ability_registry_area_args[area_args_base + 0u];\n\
          \x20           let wy: f32 = ability_registry_area_args[area_args_base + 1u];\n\
          \x20           let wz: f32 = ability_registry_area_args[area_args_base + 2u];\n\
          \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
-         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
-         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
-         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
-         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
-         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
-         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
-         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
-         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20           // Walk every cell the shape can touch: the box centre +/- reach,\n\
+         \x20           // reach = a bound on the shape's extent (padded 1e-3 against f32\n\
+         \x20           // rounding). The exact shape test below filters candidates.\n\
+         \x20           let _aoe_reach = vec3<f32>((length(vec3<f32>(wx, wy, wz))) + 1.0e-3);\n\
+         \x20           let _aoe_lo = pos_to_cell_xyz(aoe_center - _aoe_reach);\n\
+         \x20           let _aoe_hi = pos_to_cell_xyz(aoe_center + _aoe_reach);\n\
+         \x20           for (var _qz: i32 = _aoe_lo.z; _qz <= _aoe_hi.z; _qz = _qz + 1) {\n\
+         \x20               for (var _qy: i32 = _aoe_lo.y; _qy <= _aoe_hi.y; _qy = _qy + 1) {\n\
+         \x20                   for (var _qx: i32 = _aoe_lo.x; _qx <= _aoe_hi.x; _qx = _qx + 1) {\n\
+         \x20                       let _cell = cell_index(_qx, _qy, _qz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
          \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
@@ -3912,7 +3914,7 @@ fn build_apply_ability_per_target_body(
          \x20       } else if (area_kind == 6u) {\n\
          \x20           // Sphere (#180). area_args layout: [radius, _, _, _].\n\
          \x20           // Mathematically equivalent to Circle today (3D dist² ≤\n\
-         \x20           // radius² over the 27-cell ring around\n\
+         \x20           // radius² over the cells within radius of\n\
          \x20           // `agent_pos[target_slot]`); separate branch for code\n\
          \x20           // clarity. A future divergence (e.g. flat-disk Circle vs\n\
          \x20           // true 3D Sphere) would update both branches.\n\
@@ -3920,16 +3922,16 @@ fn build_apply_ability_per_target_body(
          \x20           let radius: f32 = ability_registry_area_args[area_args_base + 0u];\n\
          \x20           let radius_sq: f32 = radius * radius;\n\
          \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
-         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
-         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
-         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
-         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
-         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
-         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
-         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
-         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20           // Walk every cell the shape can touch: the box centre +/- reach,\n\
+         \x20           // reach = a bound on the shape's extent (padded 1e-3 against f32\n\
+         \x20           // rounding). The exact shape test below filters candidates.\n\
+         \x20           let _aoe_reach = vec3<f32>((radius) + 1.0e-3);\n\
+         \x20           let _aoe_lo = pos_to_cell_xyz(aoe_center - _aoe_reach);\n\
+         \x20           let _aoe_hi = pos_to_cell_xyz(aoe_center + _aoe_reach);\n\
+         \x20           for (var _qz: i32 = _aoe_lo.z; _qz <= _aoe_hi.z; _qz = _qz + 1) {\n\
+         \x20               for (var _qy: i32 = _aoe_lo.y; _qy <= _aoe_hi.y; _qy = _qy + 1) {\n\
+         \x20                   for (var _qx: i32 = _aoe_lo.x; _qx <= _aoe_hi.x; _qx = _qx + 1) {\n\
+         \x20                       let _cell = cell_index(_qx, _qy, _qz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
          \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
@@ -3970,26 +3972,22 @@ fn build_apply_ability_per_target_body(
          \x20           // unsatisfiable (lhs > rhs) ⇒ empty in-ring set. Both\n\
          \x20           // backends agree.\n\
          \x20           //\n\
-         \x20           // **Spatial walk limitation.** 27-cell walk; if outer\n\
-         \x20           // radius exceeds `SPATIAL_CELL_SIZE`, candidates beyond\n\
-         \x20           // the 27-cell footprint are missed. Fixtures must keep\n\
-         \x20           // outer ≤ cell size to stay byte-equal across backends.\n\
          \x20           let area_args_base: u32 = (effect_base + i) * 4u;\n\
          \x20           let inner: f32 = ability_registry_area_args[area_args_base + 0u];\n\
          \x20           let outer: f32 = ability_registry_area_args[area_args_base + 1u];\n\
          \x20           let inner_sq: f32 = inner * inner;\n\
          \x20           let outer_sq: f32 = outer * outer;\n\
          \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
-         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
-         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
-         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
-         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
-         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
-         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
-         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
-         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20           // Walk every cell the shape can touch: the box centre +/- reach,\n\
+         \x20           // reach = a bound on the shape's extent (padded 1e-3 against f32\n\
+         \x20           // rounding). The exact shape test below filters candidates.\n\
+         \x20           let _aoe_reach = vec3<f32>((outer) + 1.0e-3);\n\
+         \x20           let _aoe_lo = pos_to_cell_xyz(aoe_center - _aoe_reach);\n\
+         \x20           let _aoe_hi = pos_to_cell_xyz(aoe_center + _aoe_reach);\n\
+         \x20           for (var _qz: i32 = _aoe_lo.z; _qz <= _aoe_hi.z; _qz = _qz + 1) {\n\
+         \x20               for (var _qy: i32 = _aoe_lo.y; _qy <= _aoe_hi.y; _qy = _qy + 1) {\n\
+         \x20                   for (var _qx: i32 = _aoe_lo.x; _qx <= _aoe_hi.x; _qx = _qx + 1) {\n\
+         \x20                       let _cell = cell_index(_qx, _qy, _qz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
          \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
@@ -4035,10 +4033,6 @@ fn build_apply_ability_per_target_body(
          \x20           // no targets. The `dir_len_sq < 1e-6` branch matches the\n\
          \x20           // CPU oracle's `apply_program_aoe_line_filter`.\n\
          \x20           //\n\
-         \x20           // **Spatial walk limitation.** 27-cell walk around the\n\
-         \x20           // apex; if length exceeds `SPATIAL_CELL_SIZE` candidates\n\
-         \x20           // past the 27-cell footprint are missed. Fixtures must\n\
-         \x20           // keep length ≤ cell size to stay byte-equal.\n\
          \x20           let area_args_base: u32 = (effect_base + i) * 4u;\n\
          \x20           let length: f32 = ability_registry_area_args[area_args_base + 0u];\n\
          \x20           let width: f32 = ability_registry_area_args[area_args_base + 1u];\n\
@@ -4052,16 +4046,16 @@ fn build_apply_ability_per_target_body(
          \x20               // Non-degenerate line. Direction = normalize(target -\n\
          \x20               // apex); inverseSqrt matches CPU's `recip().sqrt()`.\n\
          \x20               let direction: vec3<f32> = direction_raw * inverseSqrt(dir_len_sq);\n\
-         \x20               let _self_cell_f = (apex + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
-         \x20               let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
-         \x20               let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
-         \x20               let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
-         \x20               let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
-         \x20               for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
-         \x20                   for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
-         \x20                       for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
-         \x20                           if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
-         \x20                           let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20               // Walk every cell the shape can touch: the box centre +/- reach,\n\
+         \x20               // reach = a bound on the shape's extent (padded 1e-3 against f32\n\
+         \x20               // rounding). The exact shape test below filters candidates.\n\
+         \x20               let _aoe_reach = vec3<f32>((length + width) + 1.0e-3);\n\
+         \x20               let _aoe_lo = pos_to_cell_xyz(apex - _aoe_reach);\n\
+         \x20               let _aoe_hi = pos_to_cell_xyz(apex + _aoe_reach);\n\
+         \x20               for (var _qz: i32 = _aoe_lo.z; _qz <= _aoe_hi.z; _qz = _qz + 1) {\n\
+         \x20                   for (var _qy: i32 = _aoe_lo.y; _qy <= _aoe_hi.y; _qy = _qy + 1) {\n\
+         \x20                       for (var _qx: i32 = _aoe_lo.x; _qx <= _aoe_hi.x; _qx = _qx + 1) {\n\
+         \x20                           let _cell = cell_index(_qx, _qy, _qz);\n\
          \x20                           let _start = spatial_grid_starts[_cell];\n\
          \x20                           let _end = spatial_grid_starts[_cell + 1u];\n\
          \x20                           for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
@@ -4105,24 +4099,21 @@ fn build_apply_ability_per_target_body(
          \x20           //   1. dist_xz_sq = dx*dx + dz*dz ≤ radius²\n\
          \x20           //   2. 0 ≤ dy ≤ height\n\
          \x20           //\n\
-         \x20           // **Spatial walk limitation.** 27-cell walk; if either radius\n\
-         \x20           // or height exceeds `SPATIAL_CELL_SIZE` candidates beyond the\n\
-         \x20           // 27-cell footprint are missed.\n\
          \x20           let area_args_base: u32 = (effect_base + i) * 4u;\n\
          \x20           let radius: f32 = ability_registry_area_args[area_args_base + 0u];\n\
          \x20           let height: f32 = ability_registry_area_args[area_args_base + 1u];\n\
          \x20           let radius_sq: f32 = radius * radius;\n\
          \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
-         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
-         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
-         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
-         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
-         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
-         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
-         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
-         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20           // Walk every cell the shape can touch: the box centre +/- reach,\n\
+         \x20           // reach = a bound on the shape's extent (padded 1e-3 against f32\n\
+         \x20           // rounding). The exact shape test below filters candidates.\n\
+         \x20           let _aoe_reach = vec3<f32>((radius + height) + 1.0e-3);\n\
+         \x20           let _aoe_lo = pos_to_cell_xyz(aoe_center - _aoe_reach);\n\
+         \x20           let _aoe_hi = pos_to_cell_xyz(aoe_center + _aoe_reach);\n\
+         \x20           for (var _qz: i32 = _aoe_lo.z; _qz <= _aoe_hi.z; _qz = _qz + 1) {\n\
+         \x20               for (var _qy: i32 = _aoe_lo.y; _qy <= _aoe_hi.y; _qy = _qy + 1) {\n\
+         \x20                   for (var _qx: i32 = _aoe_lo.x; _qx <= _aoe_hi.x; _qx = _qx + 1) {\n\
+         \x20                       let _cell = cell_index(_qx, _qy, _qz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
          \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
@@ -4166,9 +4157,6 @@ fn build_apply_ability_per_target_body(
          \x20           //   |lateral| ≤ length/2\n\
          \x20           //   0 ≤ dy ≤ height\n\
          \x20           //\n\
-         \x20           // **Spatial walk limitation.** 27-cell walk around target_slot;\n\
-         \x20           // any of length, height, thickness exceeding SPATIAL_CELL_SIZE\n\
-         \x20           // means candidates beyond the 27-cell footprint are missed.\n\
          \x20           let area_args_base: u32 = (effect_base + i) * 4u;\n\
          \x20           let length: f32 = ability_registry_area_args[area_args_base + 0u];\n\
          \x20           let height: f32 = ability_registry_area_args[area_args_base + 1u];\n\
@@ -4179,16 +4167,16 @@ fn build_apply_ability_per_target_body(
          \x20           let dir_x: f32 = cos(theta_rad);\n\
          \x20           let dir_z: f32 = sin(theta_rad);\n\
          \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
-         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
-         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
-         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
-         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
-         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
-         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
-         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
-         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20           // Walk every cell the shape can touch: the box centre +/- reach,\n\
+         \x20           // reach = a bound on the shape's extent (padded 1e-3 against f32\n\
+         \x20           // rounding). The exact shape test below filters candidates.\n\
+         \x20           let _aoe_reach = vec3<f32>((length + height + thickness) + 1.0e-3);\n\
+         \x20           let _aoe_lo = pos_to_cell_xyz(aoe_center - _aoe_reach);\n\
+         \x20           let _aoe_hi = pos_to_cell_xyz(aoe_center + _aoe_reach);\n\
+         \x20           for (var _qz: i32 = _aoe_lo.z; _qz <= _aoe_hi.z; _qz = _qz + 1) {\n\
+         \x20               for (var _qy: i32 = _aoe_lo.y; _qy <= _aoe_hi.y; _qy = _qy + 1) {\n\
+         \x20                   for (var _qx: i32 = _aoe_lo.x; _qx <= _aoe_hi.x; _qx = _qx + 1) {\n\
+         \x20                       let _cell = cell_index(_qx, _qy, _qz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
          \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
@@ -4235,16 +4223,16 @@ fn build_apply_ability_per_target_body(
          \x20           let radius_sq: f32 = radius * radius;\n\
          \x20           let half_height: f32 = height * 0.5;\n\
          \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
-         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
-         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
-         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
-         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
-         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
-         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
-         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
-         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20           // Walk every cell the shape can touch: the box centre +/- reach,\n\
+         \x20           // reach = a bound on the shape's extent (padded 1e-3 against f32\n\
+         \x20           // rounding). The exact shape test below filters candidates.\n\
+         \x20           let _aoe_reach = vec3<f32>((radius + height) + 1.0e-3);\n\
+         \x20           let _aoe_lo = pos_to_cell_xyz(aoe_center - _aoe_reach);\n\
+         \x20           let _aoe_hi = pos_to_cell_xyz(aoe_center + _aoe_reach);\n\
+         \x20           for (var _qz: i32 = _aoe_lo.z; _qz <= _aoe_hi.z; _qz = _qz + 1) {\n\
+         \x20               for (var _qy: i32 = _aoe_lo.y; _qy <= _aoe_hi.y; _qy = _qy + 1) {\n\
+         \x20                   for (var _qx: i32 = _aoe_lo.x; _qx <= _aoe_hi.x; _qx = _qx + 1) {\n\
+         \x20                       let _cell = cell_index(_qx, _qy, _qz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
          \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
@@ -4284,16 +4272,16 @@ fn build_apply_ability_per_target_body(
          \x20           let radius: f32 = ability_registry_area_args[area_args_base + 0u];\n\
          \x20           let radius_sq: f32 = radius * radius;\n\
          \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
-         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
-         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
-         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
-         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
-         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
-         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
-         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
-         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20           // Walk every cell the shape can touch: the box centre +/- reach,\n\
+         \x20           // reach = a bound on the shape's extent (padded 1e-3 against f32\n\
+         \x20           // rounding). The exact shape test below filters candidates.\n\
+         \x20           let _aoe_reach = vec3<f32>((radius) + 1.0e-3);\n\
+         \x20           let _aoe_lo = pos_to_cell_xyz(aoe_center - _aoe_reach);\n\
+         \x20           let _aoe_hi = pos_to_cell_xyz(aoe_center + _aoe_reach);\n\
+         \x20           for (var _qz: i32 = _aoe_lo.z; _qz <= _aoe_hi.z; _qz = _qz + 1) {\n\
+         \x20               for (var _qy: i32 = _aoe_lo.y; _qy <= _aoe_hi.y; _qy = _qy + 1) {\n\
+         \x20                   for (var _qx: i32 = _aoe_lo.x; _qx <= _aoe_hi.x; _qx = _qx + 1) {\n\
+         \x20                       let _cell = cell_index(_qx, _qy, _qz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
          \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
@@ -4339,16 +4327,16 @@ fn build_apply_ability_per_target_body(
          \x20           let radius: f32 = ability_registry_area_args[area_args_base + 0u];\n\
          \x20           let bevel_sq: f32 = 2.0 * radius * radius;\n\
          \x20           let aoe_center: vec3<f32> = agent_pos[target_slot];\n\
-         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
-         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
-         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
-         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
-         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
-         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
-         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
-         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20           // Walk every cell the shape can touch: the box centre +/- reach,\n\
+         \x20           // reach = a bound on the shape's extent (padded 1e-3 against f32\n\
+         \x20           // rounding). The exact shape test below filters candidates.\n\
+         \x20           let _aoe_reach = vec3<f32>((radius) + 1.0e-3);\n\
+         \x20           let _aoe_lo = pos_to_cell_xyz(aoe_center - _aoe_reach);\n\
+         \x20           let _aoe_hi = pos_to_cell_xyz(aoe_center + _aoe_reach);\n\
+         \x20           for (var _qz: i32 = _aoe_lo.z; _qz <= _aoe_hi.z; _qz = _qz + 1) {\n\
+         \x20               for (var _qy: i32 = _aoe_lo.y; _qy <= _aoe_hi.y; _qy = _qy + 1) {\n\
+         \x20                   for (var _qx: i32 = _aoe_lo.x; _qx <= _aoe_hi.x; _qx = _qx + 1) {\n\
+         \x20                       let _cell = cell_index(_qx, _qy, _qz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
          \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
@@ -4419,9 +4407,6 @@ fn build_apply_ability_per_target_body(
          \x20           // they sort to the high end and never enter the truncated\n\
          \x20           // kept set (n_emit = min(n_collected, max_targets)).\n\
          \x20           //\n\
-         \x20           // **Spatial walk limitation.** 27-cell walk; if radius exceeds\n\
-         \x20           // SPATIAL_CELL_SIZE candidates beyond the 27-cell footprint\n\
-         \x20           // are missed (same caveat as Circle/Sphere/Box).\n\
          \x20           let area_args_base: u32 = (effect_base + i) * 4u;\n\
          \x20           let radius: f32 = ability_registry_area_args[area_args_base + 0u];\n\
          \x20           let max_targets: u32 = u32(ability_registry_area_args[area_args_base + 1u]);\n\
@@ -4436,16 +4421,16 @@ fn build_apply_ability_per_target_body(
          \x20               collected[_pad] = 0xFFFFFFFFu;\n\
          \x20           }\n\
          \x20           var n_collected: u32 = 0u;\n\
-         \x20           let _self_cell_f = (aoe_center + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
-         \x20           let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
-         \x20           let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
-         \x20           let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
-         \x20           for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {\n\
-         \x20               for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {\n\
-         \x20                   for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {\n\
-         \x20                       if (!cell_in_grid(_self_cx + dx, _self_cy + dy, _self_cz + dz)) { continue; }\n\
-         \x20                       let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+         \x20           // Walk every cell the shape can touch: the box centre +/- reach,\n\
+         \x20           // reach = a bound on the shape's extent (padded 1e-3 against f32\n\
+         \x20           // rounding). The exact shape test below filters candidates.\n\
+         \x20           let _aoe_reach = vec3<f32>((radius) + 1.0e-3);\n\
+         \x20           let _aoe_lo = pos_to_cell_xyz(aoe_center - _aoe_reach);\n\
+         \x20           let _aoe_hi = pos_to_cell_xyz(aoe_center + _aoe_reach);\n\
+         \x20           for (var _qz: i32 = _aoe_lo.z; _qz <= _aoe_hi.z; _qz = _qz + 1) {\n\
+         \x20               for (var _qy: i32 = _aoe_lo.y; _qy <= _aoe_hi.y; _qy = _qy + 1) {\n\
+         \x20                   for (var _qx: i32 = _aoe_lo.x; _qx <= _aoe_hi.x; _qx = _qx + 1) {\n\
+         \x20                       let _cell = cell_index(_qx, _qy, _qz);\n\
          \x20                       let _start = spatial_grid_starts[_cell];\n\
          \x20                       let _end = spatial_grid_starts[_cell + 1u];\n\
          \x20                       for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {\n\
@@ -7284,8 +7269,19 @@ fn emit_fused_for_each_neighbor(
         // not spend), so we re-read from spatial_grid_cells. That's
         // one global read per inner iteration, which the per-tile
         // pos/vel cache offsets several-fold.
+        // Same auto-injected distance gate as the non-tiled one-ring
+        // walk below (origin = this lane's home agent, bound = the
+        // one-ring cell diagonal), so the two paths return identical
+        // candidate sets — including dropping agents clamped into an
+        // edge cell from far outside the world. Tile entries were
+        // loaded from the same position source the non-tiled gate
+        // reads (`gate_candidate_pos_wgsl`), spill entries read it
+        // directly.
+        let spill_cand_pos = gate_candidate_pos_wgsl(ctx);
         let body = format!(
             "{head}{{\n\
+             \x20   let _gate_origin_pos: vec3<f32> = agent_pos[agent_id];\n\
+             \x20   let _gate_radius_sq = 3.0 * f32(4u) * SPATIAL_CELL_SIZE * SPATIAL_CELL_SIZE;\n\
              \x20   for (var nbr_lane: u32 = 0u; nbr_lane < 27u; nbr_lane = nbr_lane + 1u) {{\n\
              \x20       // Full cell count (0 for an out-of-grid neighbour).\n\
              \x20       let _nbr_count = tile_count[nbr_lane];\n\
@@ -7303,8 +7299,12 @@ fn emit_fused_for_each_neighbor(
              \x20           let per_pair_candidate = spatial_grid_cells[_nbr_start + _i];\n\
              \x20           if (_i < SPATIAL_MAX_PER_CELL) {{\n\
              \x20               let _tile_idx = nbr_lane * SPATIAL_MAX_PER_CELL + _i;\n\
+             \x20               let _gate_dxyz = tile_pos[_tile_idx] - _gate_origin_pos;\n\
+             \x20               if (dot(_gate_dxyz, _gate_dxyz) > _gate_radius_sq) {{ continue; }}\n\
              {updates}\
              \x20           }} else {{\n\
+             \x20               let _gate_dxyz = {spill_cand_pos} - _gate_origin_pos;\n\
+             \x20               if (dot(_gate_dxyz, _gate_dxyz) > _gate_radius_sq) {{ continue; }}\n\
              {spill_updates}\
              \x20           }}\n\
              \x20       }}\n\
@@ -7313,6 +7313,7 @@ fn emit_fused_for_each_neighbor(
             head = head,
             updates = updates,
             spill_updates = spill_updates,
+            spill_cand_pos = spill_cand_pos,
         );
         Ok(body)
     } else {
@@ -7331,7 +7332,7 @@ fn emit_fused_for_each_neighbor(
             let radius_wgsl = lower_cg_expr_to_wgsl(radius_id, ctx)?;
             return Ok(format!(
                 "{head}{}",
-                emit_declared_radius_walk(&origin_wgsl, &radius_wgsl, &updates)
+                emit_declared_radius_walk(&origin_wgsl, &radius_wgsl, &gate_candidate_pos_wgsl(ctx), &updates)
             ));
         }
         // Auto-injected distance gate (Gap dungeon_layout#1) — same
@@ -7367,7 +7368,7 @@ fn emit_fused_for_each_neighbor(
              \x20               let _end = spatial_grid_starts[_cell + 1u];\n\
              \x20               for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {{\n\
              \x20                   let per_pair_candidate = spatial_grid_cells[_i];\n\
-             \x20                   let _gate_dxyz = agent_pos[per_pair_candidate] - _gate_origin_pos;\n\
+             \x20                   let _gate_dxyz = {cand_pos} - _gate_origin_pos;\n\
              \x20                   let _gate_dist_sq = dot(_gate_dxyz, _gate_dxyz);\n\
              \x20                   if (_gate_dist_sq > _gate_radius_sq) {{ continue; }}\n\
              {updates}\
@@ -7380,10 +7381,21 @@ fn emit_fused_for_each_neighbor(
             r_plus_one_sq = r_plus_one_sq,
             head = head,
             origin_wgsl = origin_wgsl,
+            cand_pos = gate_candidate_pos_wgsl(ctx),
             updates = updates,
         );
         Ok(body)
     }
+}
+
+/// WGSL for a walk candidate's position in the auto-injected distance
+/// gates. Routed through the normal agent-field read so a kernel that
+/// shadows `pos` (self-write + cross-read hazard) gates on the same
+/// pre-tick snapshot (`agent_pos_prev`) its projections and the tiled
+/// kernel's tile load read — the gate never races the kernel's own
+/// position writes, and the tiled and non-tiled walks agree.
+fn gate_candidate_pos_wgsl(ctx: &EmitCtx) -> String {
+    agent_field_read_wgsl(AgentFieldId::Pos, &AgentRef::PerPairCandidate, ctx)
 }
 
 /// The declared-radius spatial walk shared by the fold form
@@ -7415,7 +7427,12 @@ fn emit_fused_for_each_neighbor(
 ///
 /// `inner` is the per-candidate WGSL (accumulator updates or the body
 /// statements), already indented; `per_pair_candidate` is bound for it.
-fn emit_declared_radius_walk(origin_wgsl: &str, radius_wgsl: &str, inner: &str) -> String {
+fn emit_declared_radius_walk(
+    origin_wgsl: &str,
+    radius_wgsl: &str,
+    cand_pos: &str,
+    inner: &str,
+) -> String {
     format!(
         "{{\n\
          \x20   let _gate_origin_id: u32 = {origin_wgsl};\n\
@@ -7438,7 +7455,7 @@ fn emit_declared_radius_walk(origin_wgsl: &str, radius_wgsl: &str, inner: &str) 
          \x20               let _end = spatial_grid_starts[_cell + 1u];\n\
          \x20               for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {{\n\
          \x20                   let per_pair_candidate = spatial_grid_cells[_i];\n\
-         \x20                   let _gate_dxyz = agent_pos[per_pair_candidate] - _gate_origin_pos;\n\
+         \x20                   let _gate_dxyz = {cand_pos} - _gate_origin_pos;\n\
          \x20                   let _gate_dist_sq = dot(_gate_dxyz, _gate_dxyz);\n\
          \x20                   if (_gate_dist_sq > _gate_radius_sq) {{ continue; }}\n\
          {inner}\
@@ -7545,7 +7562,12 @@ fn emit_for_each_neighbor_body(
     if let Some(radius_id) = declared_radius {
         let radius_wgsl = lower_cg_expr_to_wgsl(radius_id, ctx)?;
         let inner = format!("{indented_body}\n");
-        return Ok(emit_declared_radius_walk(&origin_wgsl, &radius_wgsl, &inner));
+        return Ok(emit_declared_radius_walk(
+            &origin_wgsl,
+            &radius_wgsl,
+            &gate_candidate_pos_wgsl(ctx),
+            &inner,
+        ));
     }
     // Auto-injected distance gate (Gap dungeon_layout#1). The spatial
     // grid's `cell_index` helper clamps OOB axis coordinates to
@@ -7591,7 +7613,7 @@ fn emit_for_each_neighbor_body(
          \x20               let _end = spatial_grid_starts[_cell + 1u];\n\
          \x20               for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {{\n\
          \x20                   let per_pair_candidate = spatial_grid_cells[_i];\n\
-         \x20                   let _gate_dxyz = agent_pos[per_pair_candidate] - _gate_origin_pos;\n\
+         \x20                   let _gate_dxyz = {cand_pos} - _gate_origin_pos;\n\
          \x20                   let _gate_dist_sq = dot(_gate_dxyz, _gate_dxyz);\n\
          \x20                   if (_gate_dist_sq > _gate_radius_sq) {{ continue; }}\n\
          {indented_body}\n\
@@ -7603,6 +7625,7 @@ fn emit_for_each_neighbor_body(
         r = r,
         r_plus_one_sq = r_plus_one_sq,
         origin_wgsl = origin_wgsl,
+        cand_pos = gate_candidate_pos_wgsl(ctx),
         indented_body = indented_body,
     );
     Ok(out)

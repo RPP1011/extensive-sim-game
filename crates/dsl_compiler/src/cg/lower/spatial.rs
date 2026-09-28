@@ -441,6 +441,69 @@ fn lower_declared_radius(
     Ok(Some(id))
 }
 
+/// Lower the declared filter of the `spatial.<method>(<origin>, ...)`
+/// query `iter` names (if it has one) for use inside that walk's body,
+/// where `binder_name` is the walk's per-candidate binder (the fold's
+/// `x in` / the `for x in`).
+///
+/// The filter is written over the declaration's own `self` /
+/// `candidate` parameters; they are rebound here to the walk's origin
+/// expression (the call's first argument, so a non-`self` origin such as
+/// an event-bound agent is honoured) and to the binder. Call this while
+/// `ctx.fold_binder_name` holds `binder_name`, so `candidate` reads lower
+/// to the per-pair candidate. Returns `Ok(None)` when the query has no
+/// filter (or is not a named `spatial.<method>` call).
+///
+/// # Errors
+///
+/// Propagates the filter's lowering error; a non-`bool` filter is a
+/// [`LoweringError::TypeCheckFailure`].
+pub fn lower_declared_filter(
+    iter: &IrExprNode,
+    binder_name: &str,
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<Option<CgExprId>, LoweringError> {
+    let (method, args) = match &iter.kind {
+        IrExpr::NamespaceCall { ns: NamespaceId::Spatial, method, args } => (method, args),
+        _ => return Ok(None),
+    };
+    let Some(filter) = ctx.spatial_query_filters.get(method.as_str()).cloned() else {
+        return Ok(None);
+    };
+    let Some(origin) = args.first().map(|a| a.value.clone()) else {
+        return Ok(None);
+    };
+    // Resolver contract (`SpatialQueryRequiresSelfCandidateBinders`):
+    // the first two params are `self` then `candidate`, bound in a fresh
+    // scope, so they are LocalRef(0) / LocalRef(1).
+    let bound = super::driver::walk_substitute_with(&filter, &|local_ref, name| {
+        if local_ref.0 == 0 && name == "self" {
+            Some(origin.clone())
+        } else if local_ref.0 == 1 && name == "candidate" {
+            Some(IrExprNode {
+                kind: IrExpr::Local(local_ref, binder_name.to_string()),
+                span,
+            })
+        } else {
+            None
+        }
+    });
+    let id = super::expr::lower_expr(&bound, ctx)?;
+    let ty = super::expr::typecheck_node(ctx, id, span)?;
+    if ty != crate::cg::expr::CgTy::Bool {
+        return Err(LoweringError::TypeCheckFailure {
+            error: crate::cg::expr::TypeError::ClaimedResultMismatch {
+                node: id,
+                expected: crate::cg::expr::CgTy::Bool,
+                got: ty,
+            },
+            span,
+        });
+    }
+    Ok(Some(id))
+}
+
 /// Convenience: recognise a spatial call from its `IrExpr` form.
 /// Returns `Ok(Some(shape))` when `node` is a recognised spatial
 /// namespace call, `Ok(None)` for any other expression shape, and
